@@ -84,9 +84,7 @@ static int	last_insert_skip; // nr of chars in front of previous insert
 static int	new_insert_skip;  // nr of chars in front of current insert
 static int	did_restart_edit;	// "restart_edit" when calling edit()
 
-#ifdef FEAT_CINDENT
 static int	can_cindent;		// may do cindenting on this line
-#endif
 
 #ifdef FEAT_RIGHTLEFT
 static int	revins_on;		// reverse insert mode on
@@ -134,15 +132,13 @@ edit(
     static linenr_T o_lnum = 0;
     int		i;
     int		did_backspace = TRUE;	    // previous char was backspace
-#ifdef FEAT_CINDENT
     int		line_is_white = FALSE;	    // line is empty before insert
-#endif
     linenr_T	old_topline = 0;	    // topline before insertion
 #ifdef FEAT_DIFF
     int		old_topfill = -1;
 #endif
     int		inserted_space = FALSE;     // just inserted a space
-    int		replaceState = REPLACE;
+    int		replaceState = MODE_REPLACE;
     int		nomove = FALSE;		    // don't move cursor on return
 #ifdef FEAT_JOB_CHANNEL
     int		cmdchar_todo = cmdchar;
@@ -172,8 +168,7 @@ edit(
     // Don't allow changes in the buffer while editing the cmdline.  The
     // caller of getcmdline() may get confused.
     // Don't allow recursive insert mode when busy with completion.
-    if (textwinlock != 0 || textlock != 0
-			  || ins_compl_active() || compl_busy || pum_visible())
+    if (textlock != 0 || ins_compl_active() || compl_busy || pum_visible())
     {
 	emsg(_(e_not_allowed_to_change_text_or_change_window));
 	return FALSE;
@@ -218,7 +213,7 @@ edit(
 	    int save_state = State;
 
 	    curwin->w_cursor = save_cursor;
-	    State = INSERT;
+	    State = MODE_INSERT;
 	    check_cursor_col();
 	    State = save_state;
 	}
@@ -272,19 +267,19 @@ edit(
 
     if (cmdchar == 'R')
     {
-	State = REPLACE;
+	State = MODE_REPLACE;
     }
     else if (cmdchar == 'V' || cmdchar == 'v')
     {
-	State = VREPLACE;
-	replaceState = VREPLACE;
+	State = MODE_VREPLACE;
+	replaceState = MODE_VREPLACE;
 	orig_line_count = curbuf->b_ml.ml_line_count;
 	vr_lines_changed = 1;
     }
     else
-	State = INSERT;
+	State = MODE_INSERT;
 
-    trigger_modechanged();
+    may_trigger_modechanged();
     stop_insert_mode = FALSE;
 
 #ifdef FEAT_CONCEAL
@@ -293,11 +288,9 @@ edit(
     conceal_check_cursor_line(cursor_line_was_concealed);
 #endif
 
-    /*
-     * Need to recompute the cursor position, it might move when the cursor is
-     * on a TAB or special character.
-     */
-    curs_columns(TRUE);
+    // need to position cursor again when on a TAB
+    if (gchar_cursor() == TAB)
+	curwin->w_valid &= ~(VALID_WROW|VALID_WCOL|VALID_VIRTCOL);
 
     /*
      * Enable langmap or IME, indicated by 'iminsert'.
@@ -306,7 +299,7 @@ edit(
      * when hitting <Esc>.
      */
     if (curbuf->b_p_iminsert == B_IMODE_LMAP)
-	State |= LANGMAP;
+	State |= MODE_LANGMAP;
 #ifdef HAVE_INPUT_METHOD
     im_set_active(curbuf->b_p_iminsert == B_IMODE_IM);
 #endif
@@ -317,7 +310,7 @@ edit(
 #endif
 #ifdef FEAT_RIGHTLEFT
     // there is no reverse replace mode
-    revins_on = (State == INSERT && p_ri);
+    revins_on = (State == MODE_INSERT && p_ri);
     if (revins_on)
 	undisplay_dollar();
     revins_chars = 0;
@@ -326,9 +319,8 @@ edit(
 #endif
     if (!p_ek)
     {
-#ifdef FEAT_JOB_CHANNEL
-	ch_log_output = TRUE;
-#endif
+	MAY_WANT_TO_LOG_THIS;
+
 	// Disable bracketed paste mode, we won't recognize the escape
 	// sequences.
 	out_str(T_BD);
@@ -389,9 +381,7 @@ edit(
     ins_need_undo = TRUE;
 
     where_paste_started.lnum = 0;
-#ifdef FEAT_CINDENT
     can_cindent = TRUE;
-#endif
 #ifdef FEAT_FOLDING
     // The cursor line is not in a closed fold, unless 'insertmode' is set or
     // restarting.
@@ -450,7 +440,7 @@ edit(
 	if (update_Insstart_orig)
 	    Insstart_orig = Insstart;
 
-	if (stop_insert_mode && !pum_visible())
+	if (stop_insert_mode && !ins_compl_active())
 	{
 	    // ":stopinsert" used or 'insertmode' reset
 	    count = 0;
@@ -744,7 +734,6 @@ edit(
 	    continue;
 	}
 
-#ifdef FEAT_CINDENT
 	if (cindent_on() && ctrl_x_mode_none())
 	{
 	    // A key name preceded by a bang means this key is not to be
@@ -758,7 +747,6 @@ edit(
 							&& stop_arrow() == OK)
 		do_c_expr_indent();
 	}
-#endif
 
 #ifdef FEAT_RIGHTLEFT
 	if (curwin->w_p_rl)
@@ -965,6 +953,7 @@ doESCkey:
 	    break;
 
 	case K_BS:	// delete character before the cursor
+	case K_S_BS:
 	case Ctrl_H:
 	    did_backspace = ins_bs(c, BACKSPACE_CHAR, &inserted_space);
 	    auto_format(FALSE, TRUE);
@@ -1295,6 +1284,7 @@ docomplete:
 	    disable_fold_update--;
 #endif
 	    compl_busy = FALSE;
+	    can_si = may_do_si(); // allow smartindenting
 	    break;
 
 	case Ctrl_Y:	// copy from previous line or scroll down
@@ -1344,18 +1334,14 @@ normalchar:
 		    break;
 	    }
 #endif
-#ifdef FEAT_SMARTINDENT
 	    // Try to perform smart-indenting.
 	    ins_try_si(c);
-#endif
 
 	    if (c == ' ')
 	    {
 		inserted_space = TRUE;
-#ifdef FEAT_CINDENT
 		if (inindent(0))
 		    can_cindent = FALSE;
-#endif
 		if (Insstart_blank_vcol == MAXCOL
 			&& curwin->w_cursor.lnum == Insstart.lnum)
 		    Insstart_blank_vcol = get_nolist_virtcol();
@@ -1400,7 +1386,6 @@ normalchar:
 	if (arrow_used)
 	    inserted_space = FALSE;
 
-#ifdef FEAT_CINDENT
 	if (can_cindent && cindent_on() && ctrl_x_mode_normal())
 	{
 force_cindent:
@@ -1414,7 +1399,6 @@ force_cindent:
 		    do_c_expr_indent();
 	    }
 	}
-#endif // FEAT_CINDENT
 
     }	// for (;;)
     // NOTREACHED
@@ -1525,6 +1509,9 @@ ins_redraw(int ready)	    // not busy with something
 	    u_save(curwin->w_cursor.lnum,
 					(linenr_T)(curwin->w_cursor.lnum + 1));
     }
+
+    if (ready)
+	may_trigger_winscrolled();
 
     // Trigger SafeState if nothing is pending.
     may_trigger_safestate(ready
@@ -1797,8 +1784,8 @@ undisplay_dollar(void)
 
 /*
  * Truncate the space at the end of a line.  This is to be used only in an
- * insert mode.  It handles fixing the replace stack for REPLACE and VREPLACE
- * modes.
+ * insert mode.  It handles fixing the replace stack for MODE_REPLACE and
+ * MODE_VREPLACE modes.
  */
     void
 truncate_spaces(char_u *line)
@@ -1815,9 +1802,9 @@ truncate_spaces(char_u *line)
 }
 
 /*
- * Backspace the cursor until the given column.  Handles REPLACE and VREPLACE
- * modes correctly.  May also be used when not in insert mode at all.
- * Will attempt not to go before "col" even when there is a composing
+ * Backspace the cursor until the given column.  Handles MODE_REPLACE and
+ * MODE_VREPLACE modes correctly.  May also be used when not in insert mode at
+ * all.  Will attempt not to go before "col" even when there is a composing
  * character.
  */
     void
@@ -1895,7 +1882,11 @@ get_literal(int noReduceKeys)
      * vi-compatible (maybe there should be an option for it?) -- webb
      */
     if (gui.in_use)
+    {
 	++allow_keys;
+	if (noReduceKeys)
+	    ++no_reduce_keys;
+    }
 #endif
 #ifdef USE_ON_FLY_SCROLL
     dont_scroll = TRUE;		// disallow scrolling here
@@ -1915,7 +1906,7 @@ get_literal(int noReduceKeys)
 	    break;
 
 #ifdef FEAT_CMDL_INFO
-	if (!(State & CMDLINE) && MB_BYTE2LEN_CHECK(nc) == 1)
+	if ((State & MODE_CMDLINE) == 0 && MB_BYTE2LEN_CHECK(nc) == 1)
 	    add_to_showcmd(nc);
 #endif
 	if (nc == 'x' || nc == 'X')
@@ -1988,7 +1979,11 @@ get_literal(int noReduceKeys)
     --no_mapping;
 #ifdef FEAT_GUI
     if (gui.in_use)
+    {
 	--allow_keys;
+	if (noReduceKeys)
+	    --no_reduce_keys;
+    }
 #endif
     if (nc)
     {
@@ -2052,11 +2047,7 @@ insert_special(
  * stop and defer processing to the "normal" mechanism.
  * '0' and '^' are special, because they can be followed by CTRL-D.
  */
-#ifdef EBCDIC
-# define ISSPECIAL(c)	((c) < ' ' || (c) == '0' || (c) == '^')
-#else
-# define ISSPECIAL(c)	((c) < ' ' || (c) >= DEL || (c) == '0' || (c) == '^')
-#endif
+#define ISSPECIAL(c)	((c) < ' ' || (c) >= DEL || (c) == '0' || (c) == '^')
 
 /*
  * "flags": INSCHAR_FORMAT - force formatting
@@ -2090,7 +2081,7 @@ insertchar(
      * - Otherwise:
      *	 - Don't do this if inserting a blank
      *	 - Don't do this if an existing character is being replaced, unless
-     *	   we're in VREPLACE mode.
+     *	   we're in MODE_VREPLACE state.
      *	 - Do this if the cursor is not on the line where insert started
      *	 or - 'formatoptions' doesn't have 'l' or the line was not too long
      *	       before the insert.
@@ -2185,11 +2176,9 @@ insertchar(
     end_comment_pending = NUL;
 
     did_ai = FALSE;
-#ifdef FEAT_SMARTINDENT
     did_si = FALSE;
     can_si = FALSE;
     can_si_back = FALSE;
-#endif
 
     /*
      * If there's any pending input, grab up to INPUT_BUFLEN at once.
@@ -2211,9 +2200,7 @@ insertchar(
 	    && !has_insertcharpre()
 	    && vpeekc() != NUL
 	    && !(State & REPLACE_FLAG)
-#ifdef FEAT_CINDENT
 	    && !cindent_on()
-#endif
 #ifdef FEAT_RIGHTLEFT
 	    && !p_ri
 #endif
@@ -2532,24 +2519,14 @@ stop_insert(
 
 	    // <C-S-Right> may have started Visual mode, adjust the position for
 	    // deleted characters.
-	    if (VIsual_active && VIsual.lnum == curwin->w_cursor.lnum)
-	    {
-		int len = (int)STRLEN(ml_get_curline());
-
-		if (VIsual.col > len)
-		{
-		    VIsual.col = len;
-		    VIsual.coladd = 0;
-		}
-	    }
+	    if (VIsual_active)
+		check_visual_pos();
 	}
     }
     did_ai = FALSE;
-#ifdef FEAT_SMARTINDENT
     did_si = FALSE;
     can_si = FALSE;
     can_si_back = FALSE;
-#endif
 
     // Set '[ and '] to the inserted text.  When end_insert_pos is NULL we are
     // now in a different buffer.
@@ -2801,7 +2778,7 @@ cursor_up(
 		// If we entered a fold, move to the beginning, unless in
 		// Insert mode or when 'foldopen' contains "all": it will open
 		// in a moment.
-		if (n > 0 || !((State & INSERT) || (fdo_flags & FDO_ALL)))
+		if (n > 0 || !((State & MODE_INSERT) || (fdo_flags & FDO_ALL)))
 		    (void)hasFolding(lnum, &lnum, NULL);
 	    }
 	    if (lnum < 1)
@@ -2926,9 +2903,8 @@ stuff_inserted(
 	stuffReadbuff(ptr);
 	// a trailing "0" is inserted as "<C-V>048", "^" as "<C-V>^"
 	if (last)
-	    stuffReadbuff((char_u *)(last == '0'
-			? IF_EB("\026\060\064\070", CTRL_V_STR "xf0")
-			: IF_EB("\026^", CTRL_V_STR "^")));
+	    stuffReadbuff(
+		       (char_u *)(last == '0' ? "\026\060\064\070" : "\026^"));
     }
     while (--count > 0);
 
@@ -3099,7 +3075,7 @@ replace_join(
 
 /*
  * Pop bytes from the replace stack until a NUL is found, and insert them
- * before the cursor.  Can only be used in REPLACE or VREPLACE mode.
+ * before the cursor.  Can only be used in MODE_REPLACE or MODE_VREPLACE state.
  */
     static void
 replace_pop_ins(void)
@@ -3107,7 +3083,7 @@ replace_pop_ins(void)
     int	    cc;
     int	    oldState = State;
 
-    State = NORMAL;			// don't want REPLACE here
+    State = MODE_NORMAL;			// don't want MODE_REPLACE here
     while ((cc = replace_pop()) > 0)
     {
 	mb_replace_pop_ins(cc);
@@ -3151,21 +3127,20 @@ mb_replace_pop_ins(int cc)
 		replace_push(c);
 		break;
 	    }
+
+	    buf[0] = c;
+	    for (i = 1; i < n; ++i)
+		buf[i] = replace_pop();
+	    if (utf_iscomposing(utf_ptr2char(buf)))
+		ins_bytes_len(buf, n);
 	    else
 	    {
-		buf[0] = c;
-		for (i = 1; i < n; ++i)
-		    buf[i] = replace_pop();
-		if (utf_iscomposing(utf_ptr2char(buf)))
-		    ins_bytes_len(buf, n);
-		else
-		{
-		    // Not a composing char, put it back.
-		    for (i = n - 1; i >= 0; --i)
-			replace_push(buf[i]);
-		    break;
-		}
+		// Not a composing char, put it back.
+		for (i = n - 1; i >= 0; --i)
+		    replace_push(buf[i]);
+		break;
 	    }
+
 	}
 }
 
@@ -3316,15 +3291,11 @@ hkmap(int c)
 	    return ' ';  // \"a --> ' '      -- / --
 	else if (c == 252)
 	    return ' ';  // \"u --> ' '      -- / --
-#ifdef EBCDIC
-	else if (islower(c))
-#else
 	// NOTE: islower() does not do the right thing for us on Linux so we
 	// do this the same was as 5.7 and previous, so it works correctly on
 	// all systems.  Specifically, the e.g. Delete and Arrow keys are
 	// munged and won't work if e.g. searching for Hebrew text.
 	else if (c >= 'a' && c <= 'z')
-#endif
 	    return (int)(map[CharOrdLow(c)] + p_aleph);
 	else
 	    return c;
@@ -3346,12 +3317,7 @@ hkmap(int c)
 	    default: {
 			 static char str[] = "zqbcxlsjphmkwonu ydafe rig";
 
-#ifdef EBCDIC
-			 // see note about islower() above
-			 if (!islower(c))
-#else
 			 if (c < 'a' || c > 'z')
-#endif
 			     return c;
 			 c = str[CharOrdLow(c)];
 			 break;
@@ -3547,18 +3513,18 @@ ins_ctrl_g(void)
     static void
 ins_ctrl_hat(void)
 {
-    if (map_to_exists_mode((char_u *)"", LANGMAP, FALSE))
+    if (map_to_exists_mode((char_u *)"", MODE_LANGMAP, FALSE))
     {
 	// ":lmap" mappings exists, Toggle use of ":lmap" mappings.
-	if (State & LANGMAP)
+	if (State & MODE_LANGMAP)
 	{
 	    curbuf->b_p_iminsert = B_IMODE_NONE;
-	    State &= ~LANGMAP;
+	    State &= ~MODE_LANGMAP;
 	}
 	else
 	{
 	    curbuf->b_p_iminsert = B_IMODE_LMAP;
-	    State |= LANGMAP;
+	    State |= MODE_LANGMAP;
 #ifdef HAVE_INPUT_METHOD
 	    im_set_active(FALSE);
 #endif
@@ -3576,7 +3542,7 @@ ins_ctrl_hat(void)
 	else
 	{
 	    curbuf->b_p_iminsert = B_IMODE_IM;
-	    State &= ~LANGMAP;
+	    State &= ~MODE_LANGMAP;
 	    im_set_active(TRUE);
 	}
     }
@@ -3706,15 +3672,16 @@ ins_esc(
     // Disable IM to allow typing English directly for Normal mode commands.
     // When ":lmap" is enabled don't change 'iminsert' (IM can be enabled as
     // well).
-    if (!(State & LANGMAP))
+    if (!(State & MODE_LANGMAP))
 	im_save_status(&curbuf->b_p_iminsert);
     im_set_active(FALSE);
 #endif
 
-    State = NORMAL;
-    trigger_modechanged();
-    // need to position cursor again (e.g. when on a TAB )
-    changed_cline_bef_curs();
+    State = MODE_NORMAL;
+    may_trigger_modechanged();
+    // need to position cursor again when on a TAB
+    if (gchar_cursor() == TAB)
+	curwin->w_valid &= ~(VALID_WROW|VALID_WCOL|VALID_VIRTCOL);
 
     setmouse();
 #ifdef CURSOR_SHAPE
@@ -3722,9 +3689,8 @@ ins_esc(
 #endif
     if (!p_ek)
     {
-#ifdef FEAT_JOB_CHANNEL
-	ch_log_output = TRUE;
-#endif
+	MAY_WANT_TO_LOG_THIS;
+
 	// Re-enable bracketed paste mode.
 	out_str(T_BE);
 
@@ -3761,7 +3727,7 @@ ins_ctrl_(void)
 	    ++curwin->w_cursor.col;
     }
     p_ri = !p_ri;
-    revins_on = (State == INSERT && p_ri);
+    revins_on = (State == MODE_INSERT && p_ri);
     if (revins_on)
     {
 	revins_scol = curwin->w_cursor.col;
@@ -3840,15 +3806,14 @@ ins_insert(int replaceState)
 #ifdef FEAT_EVAL
     set_vim_var_string(VV_INSERTMODE,
 		   (char_u *)((State & REPLACE_FLAG) ? "i"
-		          : replaceState == VREPLACE ? "v"
-						     : "r"), 1);
+			    : replaceState == MODE_VREPLACE ? "v" : "r"), 1);
 #endif
     ins_apply_autocmds(EVENT_INSERTCHANGE);
     if (State & REPLACE_FLAG)
-	State = INSERT | (State & LANGMAP);
+	State = MODE_INSERT | (State & MODE_LANGMAP);
     else
-	State = replaceState | (State & LANGMAP);
-    trigger_modechanged();
+	State = replaceState | (State & MODE_LANGMAP);
+    may_trigger_modechanged();
     AppendCharToRedobuff(K_INS);
     showmode();
 #ifdef CURSOR_SHAPE
@@ -3908,14 +3873,10 @@ ins_shift(int c, int lastc)
 
     if (did_ai && *skipwhite(ml_get_curline()) != NUL)
 	did_ai = FALSE;
-#ifdef FEAT_SMARTINDENT
     did_si = FALSE;
     can_si = FALSE;
     can_si_back = FALSE;
-#endif
-#ifdef FEAT_CINDENT
     can_cindent = FALSE;	// no cindenting after ^D or ^T
-#endif
 }
 
     static void
@@ -3945,11 +3906,9 @@ ins_del(void)
     else if (del_char(FALSE) == FAIL)  // delete char under cursor
 	vim_beep(BO_BS);
     did_ai = FALSE;
-#ifdef FEAT_SMARTINDENT
     did_si = FALSE;
     can_si = FALSE;
     can_si_back = FALSE;
-#endif
     AppendCharToRedobuff(K_DEL);
 }
 
@@ -3992,9 +3951,7 @@ ins_bs(
     int		in_indent;
     int		oldState;
     int		cpc[MAX_MCO];	    // composing characters
-#if defined(FEAT_LISP) || defined(FEAT_CINDENT)
     int		call_fix_indent = FALSE;
-#endif
 
     /*
      * can't delete anything in an empty file
@@ -4026,10 +3983,8 @@ ins_bs(
     if (stop_arrow() == FAIL)
 	return FALSE;
     in_indent = inindent(0);
-#ifdef FEAT_CINDENT
     if (in_indent)
 	can_cindent = FALSE;
-#endif
     end_comment_pending = NUL;	// After BS, don't auto-end comment
 #ifdef FEAT_RIGHTLEFT
     if (revins_on)	    // put cursor after last inserted char
@@ -4120,20 +4075,20 @@ ins_bs(
 		dec_cursor();
 
 	    /*
-	     * In REPLACE mode we have to put back the text that was replaced
-	     * by the NL. On the replace stack is first a NUL-terminated
-	     * sequence of characters that were deleted and then the
-	     * characters that NL replaced.
+	     * In MODE_REPLACE mode we have to put back the text that was
+	     * replaced by the NL. On the replace stack is first a
+	     * NUL-terminated sequence of characters that were deleted and then
+	     * the characters that NL replaced.
 	     */
 	    if (State & REPLACE_FLAG)
 	    {
 		/*
-		 * Do the next ins_char() in NORMAL state, to
+		 * Do the next ins_char() in MODE_NORMAL state, to
 		 * prevent ins_char() from replacing characters and
 		 * avoiding showmatch().
 		 */
 		oldState = State;
-		State = NORMAL;
+		State = MODE_NORMAL;
 		/*
 		 * restore characters (blanks) deleted after cursor
 		 */
@@ -4163,11 +4118,7 @@ ins_bs(
 	mincol = 0;
 						// keep indent
 	if (mode == BACKSPACE_LINE
-		&& (curbuf->b_p_ai
-#ifdef FEAT_CINDENT
-		    || cindent_on()
-#endif
-		   )
+		&& (curbuf->b_p_ai || cindent_on())
 #ifdef FEAT_RIGHTLEFT
 		&& !revins_on
 #endif
@@ -4178,10 +4129,8 @@ ins_bs(
 	    if (curwin->w_cursor.col < save_col)
 	    {
 		mincol = curwin->w_cursor.col;
-#if defined(FEAT_LISP) || defined(FEAT_CINDENT)
 		// should now fix the indent to match with the previous line
 		call_fix_indent = TRUE;
-#endif
 	    }
 	    curwin->w_cursor.col = save_col;
 	}
@@ -4224,7 +4173,7 @@ ins_bs(
 	    }
 	    else
 		want_vcol = tabstop_start(want_vcol, get_sts_value(),
-						     curbuf->b_p_vsts_array);
+						       curbuf->b_p_vsts_array);
 #else
 	    if (p_sta && in_indent)
 		ts = (int)get_sw_value(curbuf);
@@ -4347,18 +4296,14 @@ ins_bs(
 	}
 	did_backspace = TRUE;
     }
-#ifdef FEAT_SMARTINDENT
     did_si = FALSE;
     can_si = FALSE;
     can_si_back = FALSE;
-#endif
     if (curwin->w_cursor.col <= 1)
 	did_ai = FALSE;
 
-#if defined(FEAT_LISP) || defined(FEAT_CINDENT)
     if (call_fix_indent)
 	fix_indent();
-#endif
 
     /*
      * It's a little strange to put backspaces into the redo
@@ -4417,7 +4362,7 @@ bracketed_paste(paste_mode_T mode, int drop, garray_T *gap)
     if (!p_paste)
 	// Also have the side effects of setting 'paste' to make it work much
 	// faster.
-	set_option_value((char_u *)"paste", TRUE, NULL, 0);
+	set_option_value_give_err((char_u *)"paste", TRUE, NULL, 0);
 
     for (;;)
     {
@@ -4492,7 +4437,7 @@ bracketed_paste(paste_mode_T mode, int drop, garray_T *gap)
     --no_mapping;
     allow_keys = save_allow_keys;
     if (!save_paste)
-	set_option_value((char_u *)"paste", FALSE, NULL, 0);
+	set_option_value_give_err((char_u *)"paste", FALSE, NULL, 0);
 
     return ret_char;
 }
@@ -4507,9 +4452,7 @@ ins_tabline(int c)
     {
 	undisplay_dollar();
 	start_arrow(&curwin->w_cursor);
-# ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-# endif
     }
 
     if (c == K_TABLINE)
@@ -4533,9 +4476,7 @@ ins_scroll(void)
     if (gui_do_scroll())
     {
 	start_arrow(&tpos);
-# ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-# endif
     }
 }
 
@@ -4549,9 +4490,7 @@ ins_horscroll(void)
     if (gui_do_horiz_scroll(scrollbar_value, FALSE))
     {
 	start_arrow(&tpos);
-# ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-# endif
     }
 }
 #endif
@@ -4758,9 +4697,7 @@ ins_up(
 		)
 	    redraw_later(VALID);
 	start_arrow(&tpos);
-#ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-#endif
     }
     else
 	vim_beep(BO_CRSR);
@@ -4788,9 +4725,7 @@ ins_pageup(void)
     if (onepage(BACKWARD, 1L) == OK)
     {
 	start_arrow(&tpos);
-#ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-#endif
     }
     else
 	vim_beep(BO_CRSR);
@@ -4819,9 +4754,7 @@ ins_down(
 		)
 	    redraw_later(VALID);
 	start_arrow(&tpos);
-#ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-#endif
     }
     else
 	vim_beep(BO_CRSR);
@@ -4849,9 +4782,7 @@ ins_pagedown(void)
     if (onepage(FORWARD, 1L) == OK)
     {
 	start_arrow(&tpos);
-#ifdef FEAT_CINDENT
 	can_cindent = TRUE;
-#endif
     }
     else
 	vim_beep(BO_CRSR);
@@ -4882,10 +4813,8 @@ ins_tab(void)
 	return FALSE;
 
     ind = inindent(0);
-#ifdef FEAT_CINDENT
     if (ind)
 	can_cindent = FALSE;
-#endif
 
     /*
      * When nothing special, insert TAB like a normal character.
@@ -4896,10 +4825,10 @@ ins_tab(void)
 		// These five lines mean 'tabstop' != 'shiftwidth'
 		&& ((tabstop_count(curbuf->b_p_vts_array) > 1)
 		    || (tabstop_count(curbuf->b_p_vts_array) == 1
-		        && tabstop_first(curbuf->b_p_vts_array)
+			&& tabstop_first(curbuf->b_p_vts_array)
 						       != get_sw_value(curbuf))
-	            || (tabstop_count(curbuf->b_p_vts_array) == 0
-		        && curbuf->b_p_ts != get_sw_value(curbuf))))
+		    || (tabstop_count(curbuf->b_p_vts_array) == 0
+			&& curbuf->b_p_ts != get_sw_value(curbuf))))
 	    && tabstop_count(curbuf->b_p_vsts_array) == 0
 #else
 	    && !(p_sta && ind && curbuf->b_p_ts != get_sw_value(curbuf))
@@ -4911,11 +4840,9 @@ ins_tab(void)
 	return TRUE;
 
     did_ai = FALSE;
-#ifdef FEAT_SMARTINDENT
     did_si = FALSE;
     can_si = FALSE;
     can_si_back = FALSE;
-#endif
     AppendToRedobuff((char_u *)"\t");
 
 #ifdef FEAT_VARTABS
@@ -4925,7 +4852,7 @@ ins_tab(void)
 	temp -= get_nolist_virtcol() % temp;
     }
     else if (tabstop_count(curbuf->b_p_vsts_array) > 0 || curbuf->b_p_sts != 0)
-	                        // use 'softtabstop' when set
+				// use 'softtabstop' when set
 	temp = tabstop_padding(get_nolist_virtcol(), get_sts_value(),
 						     curbuf->b_p_vsts_array);
     else			// otherwise use 'tabstop'
@@ -4944,7 +4871,7 @@ ins_tab(void)
     /*
      * Insert the first space with ins_char().	It will delete one char in
      * replace mode.  Insert the rest with ins_str(); it will not delete any
-     * chars.  For VREPLACE mode, we use ins_char() for all characters.
+     * chars.  For MODE_VREPLACE state, we use ins_char() for all characters.
      */
     ins_char(' ');
     while (--temp > 0)
@@ -4964,7 +4891,7 @@ ins_tab(void)
      */
 #ifdef FEAT_VARTABS
     if (!curbuf->b_p_et && (tabstop_count(curbuf->b_p_vsts_array) > 0
-                            || get_sts_value() > 0
+			    || get_sts_value() > 0
 			    || (p_sta && ind)))
 #else
     if (!curbuf->b_p_et && (get_sts_value() || (p_sta && ind)))
@@ -4980,8 +4907,8 @@ ins_tab(void)
 	int		save_list = curwin->w_p_list;
 
 	/*
-	 * Get the current line.  For VREPLACE mode, don't make real changes
-	 * yet, just work on a copy of the line.
+	 * Get the current line.  For MODE_VREPLACE state, don't make real
+	 * changes yet, just work on a copy of the line.
 	 */
 	if (State & VREPLACE_FLAG)
 	{
@@ -5112,9 +5039,9 @@ ins_tab(void)
 	    cursor->col -= i;
 
 	    /*
-	     * In VREPLACE mode, we haven't changed anything yet.  Do it now by
-	     * backspacing over the changed spacing and then inserting the new
-	     * spacing.
+	     * In MODE_VREPLACE state, we haven't changed anything yet.  Do it
+	     * now by backspacing over the changed spacing and then inserting
+	     * the new spacing.
 	     */
 	    if (State & VREPLACE_FLAG)
 	    {
@@ -5160,7 +5087,7 @@ ins_eol(int c)
 	replace_push(NUL);
 
     /*
-     * In VREPLACE mode, a NL replaces the rest of the line, and starts
+     * In MODE_VREPLACE state, a NL replaces the rest of the line, and starts
      * replacing the next line, so we push all of the characters left on the
      * line onto the replace stack.  This is not done here though, it is done
      * in open_line().
@@ -5183,9 +5110,7 @@ ins_eol(int c)
 	    has_format_option(FO_RET_COMS) ? OPENLINE_DO_COM : 0, old_indent,
 	    NULL);
     old_indent = 0;
-#ifdef FEAT_CINDENT
     can_cindent = TRUE;
-#endif
 #ifdef FEAT_FOLDING
     // When inserting a line the cursor line must never be in a closed fold.
     foldOpenCursor();
@@ -5414,7 +5339,7 @@ do_insert_char_pre(int c)
     }
 
     // Lock the text to avoid weird things from happening.
-    ++textwinlock;
+    ++textlock;
     set_vim_var_string(VV_CHAR, buf, -1);  // set v:char
 
     res = NULL;
@@ -5428,7 +5353,7 @@ do_insert_char_pre(int c)
     }
 
     set_vim_var_string(VV_CHAR, NULL, -1);  // clear v:char
-    --textwinlock;
+    --textlock;
 
     // Restore the State, it may have been changed.
     State = save_State;
@@ -5437,7 +5362,6 @@ do_insert_char_pre(int c)
 }
 #endif
 
-#if defined(FEAT_CINDENT) || defined(PROTO)
     int
 get_can_cindent(void)
 {
@@ -5449,7 +5373,6 @@ set_can_cindent(int val)
 {
     can_cindent = val;
 }
-#endif
 
 /*
  * Trigger "event" and take care of fixing undo.

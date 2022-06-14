@@ -1,7 +1,7 @@
 " Vim support file to detect file types in scripts
 "
 " Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last change:	2021 Jan 22
+" Last change:	2022 Feb 13
 
 " This file is called by an autocommand for every file that has just been
 " loaded into a buffer.  It checks if the type of file can be recognized by
@@ -12,7 +12,7 @@
 " =~? instead.  Do not use =~ anywhere.
 
 
-" Only do the rest when the FileType autocommand has not been triggered yet.
+" Bail out when a FileType autocommand has already set the filetype.
 if did_filetype()
   finish
 endif

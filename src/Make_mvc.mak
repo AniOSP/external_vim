@@ -391,7 +391,8 @@ SODIUM = no
 !if "$(SODIUM)" != "no"
 SOD_INC		= /I "$(SODIUM)\include"
 ! if "$(DYNAMIC_SODIUM)" == "yes"
-SOD_DEFS	= -DHAVE_SODIUM -DDYNAMIC_SODIUM
+SODIUM_DLL	= libsodium.dll
+SOD_DEFS	= -DHAVE_SODIUM -DDYNAMIC_SODIUM -DDYNAMIC_SODIUM_DLL=\"$(SODIUM_DLL)\"
 SOD_LIB		=
 ! else
 SOD_DEFS	= -DHAVE_SODIUM
@@ -1186,7 +1187,11 @@ RUBY_MSVCRT_NAME = $(MSVCRT_NAME)
 !   if "$(CPU)" == "i386"
 RUBY_INSTALL_NAME = $(RUBY_MSVCRT_NAME)-ruby$(RUBY_API_VER)
 !   else # CPU
+!    if EXIST($(RUBY)/lib/ruby/$(RUBY_API_VER_LONG)/x64-mingw-ucrt)
+RUBY_INSTALL_NAME = x64-ucrt-ruby$(RUBY_API_VER)
+!    else
 RUBY_INSTALL_NAME = x64-$(RUBY_MSVCRT_NAME)-ruby$(RUBY_API_VER)
+!    endif
 !   endif # CPU
 !  endif # RUBY_INSTALL_NAME
 
@@ -1444,24 +1449,24 @@ clean: testclean
 # If this fails because you don't have Vim yet, first build and install Vim
 # without changes.
 cmdidxs: ex_cmds.h
-	vim --clean -X --not-a-term -u create_cmdidxs.vim
+	vim --clean -N -X --not-a-term -u create_cmdidxs.vim -c quit
 
 # Run vim script to generate the normal/visual mode command lookup table.
 # This only needs to be run when a new normal/visual mode command has been
 # added.  If this fails because you don't have Vim yet:
-#   - change nv_cmds[] in normal.c to add the new normal/visual mode command.
-#   - build Vim
-#   - run "make nvcmdidxs" using the new Vim to generate nv_cmdidxs.h
-#   - rebuild Vim to use the newly generated nv_cmdidxs.h file.
-nvcmdidxs: normal.c
-	.\$(VIM) --clean -X --not-a-term -u create_nvcmdidxs.vim
+#   - change nv_cmds[] in nv_cmds.h to add the new normal/visual mode command.
+#   - run "make nvcmdidxs" to generate nv_cmdidxs.h
+nvcmdidxs: nv_cmds.h
+	$(CC) /nologo -I. -Iproto -DNDEBUG create_nvcmdidxs.c -link -subsystem:$(SUBSYSTEM_TOOLS)
+	vim --clean -N -X --not-a-term -u create_nvcmdidxs.vim -c quit
+	-del create_nvcmdidxs.exe
 
 test:
 	cd testdir
 	$(MAKE) /NOLOGO -f Make_dos.mak
 	cd ..
 
-testgvim:
+testgvim testgui:
 	cd testdir
 	$(MAKE) /NOLOGO -f Make_dos.mak VIMPROG=..\gvim
 	cd ..
@@ -1719,7 +1724,7 @@ $(OUTDIR)/netbeans.obj:	$(OUTDIR) netbeans.c $(NBDEBUG_SRC) $(INCL) version.h
 
 $(OUTDIR)/channel.obj:	$(OUTDIR) channel.c $(INCL)
 
-$(OUTDIR)/normal.obj:	$(OUTDIR) normal.c  $(INCL) nv_cmdidxs.h
+$(OUTDIR)/normal.obj:	$(OUTDIR) normal.c  $(INCL) nv_cmdidxs.h nv_cmds.h
 
 $(OUTDIR)/option.obj:	$(OUTDIR) option.c  $(INCL) optiondefs.h
 
@@ -1808,19 +1813,19 @@ $(OUTDIR)/userfunc.obj:	$(OUTDIR) userfunc.c  $(INCL)
 
 $(OUTDIR)/version.obj:	$(OUTDIR) version.c  $(INCL) version.h
 
-$(OUTDIR)/vim9cmds.obj:	$(OUTDIR) vim9cmds.c  $(INCL)
+$(OUTDIR)/vim9cmds.obj:	$(OUTDIR) vim9cmds.c  $(INCL) vim9.h
 
-$(OUTDIR)/vim9compile.obj:	$(OUTDIR) vim9compile.c  $(INCL)
+$(OUTDIR)/vim9compile.obj:	$(OUTDIR) vim9compile.c  $(INCL) vim9.h
 
-$(OUTDIR)/vim9execute.obj:	$(OUTDIR) vim9execute.c  $(INCL)
+$(OUTDIR)/vim9execute.obj:	$(OUTDIR) vim9execute.c  $(INCL) vim9.h
 
-$(OUTDIR)/vim9expr.obj:	$(OUTDIR) vim9expr.c  $(INCL)
+$(OUTDIR)/vim9expr.obj:	$(OUTDIR) vim9expr.c  $(INCL) vim9.h
 
-$(OUTDIR)/vim9instr.obj:	$(OUTDIR) vim9instr.c  $(INCL)
+$(OUTDIR)/vim9instr.obj:	$(OUTDIR) vim9instr.c  $(INCL) vim9.h
 
-$(OUTDIR)/vim9script.obj:	$(OUTDIR) vim9script.c  $(INCL)
+$(OUTDIR)/vim9script.obj:	$(OUTDIR) vim9script.c  $(INCL) vim9.h
 
-$(OUTDIR)/vim9type.obj:	$(OUTDIR) vim9type.c  $(INCL)
+$(OUTDIR)/vim9type.obj:	$(OUTDIR) vim9type.c  $(INCL) vim9.h
 
 $(OUTDIR)/viminfo.obj:	$(OUTDIR) viminfo.c  $(INCL) version.h
 

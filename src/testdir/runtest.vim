@@ -245,6 +245,12 @@ func RunTheTest(test)
     call popup_clear(1)
   endif
 
+  if filereadable('guidialogfile')
+    call add(v:errors, "Unexpected dialog:")
+    call add(v:errors, readfile('guidialogfile').join('\n'))
+    call delete('guidialogfile')
+  endif
+
   " Close any extra tab pages and windows and make the current one not modified.
   while tabpagenr('$') > 1
     let winid = win_getid()
@@ -409,6 +415,9 @@ else
     call add(s:errors, 'Caught exception: ' . v:exception . ' @ ' . v:throwpoint)
   endtry
 endif
+
+" Delete the .res file, it may change behavior for completion
+call delete(fnamemodify(g:testname, ':r') .. '.res')
 
 " Locate Test_ functions and execute them.
 redir @q

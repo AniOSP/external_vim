@@ -68,13 +68,13 @@ conceal_cursor_line(win_T *wp)
 
     if (*wp->w_p_cocu == NUL)
 	return FALSE;
-    if (get_real_state() & VISUAL)
+    if (get_real_state() & MODE_VISUAL)
 	c = 'v';
-    else if (State & INSERT)
+    else if (State & MODE_INSERT)
 	c = 'i';
-    else if (State & NORMAL)
+    else if (State & MODE_NORMAL)
 	c = 'n';
-    else if (State & CMDLINE)
+    else if (State & MODE_CMDLINE)
 	c = 'c';
     else
 	return FALSE;
@@ -1495,8 +1495,9 @@ screen_puts_len(
     int		textlen,
     int		row,
     int		col,
-    int		attr)
+    int		attr_arg)
 {
+    int		attr = attr_arg;
     unsigned	off;
     char_u	*ptr = text;
     int		len = textlen;
@@ -1722,8 +1723,10 @@ screen_puts_len(
 	    if (clear_next_cell)
 	    {
 		// This only happens at the end, display one space next.
+		// Keep the attribute from before.
 		ptr = (char_u *)" ";
 		len = -1;
+		attr = ScreenAttrs[off];
 	    }
 	}
 	else
@@ -1757,10 +1760,6 @@ start_search_hl(void)
 	end_search_hl();  // just in case it wasn't called before
 	last_pat_prog(&screen_search_hl.rm);
 	screen_search_hl.attr = HL_ATTR(HLF_L);
-# ifdef FEAT_RELTIME
-	// Set the time limit to 'redrawtime'.
-	profile_setlimit(p_rdt, &screen_search_hl.tm);
-# endif
     }
 }
 
@@ -1796,7 +1795,7 @@ screen_start_highlight(int attr)
 	    char	buf[20];
 
 	    // The GUI handles this internally.
-	    sprintf(buf, IF_EB("\033|%dh", ESC_STR "|%dh"), attr);
+	    sprintf(buf, "\033|%dh", attr);
 	    OUT_STR(buf);
 	}
 	else
@@ -1946,7 +1945,7 @@ screen_stop_highlight(void)
 	    char	buf[20];
 
 	    // use internal GUI code
-	    sprintf(buf, IF_EB("\033|%dH", ESC_STR "|%dH"), screen_attr);
+	    sprintf(buf, "\033|%dH", screen_attr);
 	    OUT_STR(buf);
 	}
 	else
@@ -2328,9 +2327,9 @@ space_to_screenline(int off, int attr)
 }
 
 /*
- * Fill the screen from 'start_row' to 'end_row', from 'start_col' to 'end_col'
- * with character 'c1' in first column followed by 'c2' in the other columns.
- * Use attributes 'attr'.
+ * Fill the screen from "start_row" to "end_row" (exclusive), from "start_col"
+ * to "end_col" (exclusive) with character "c1" in first column followed by
+ * "c2" in the other columns.  Use attributes "attr".
  */
     void
 screen_fill(
@@ -3631,9 +3630,9 @@ win_rest_invalid(win_T *wp)
 
 /*
  * insert lines on the screen and update ScreenLines[]
- * 'end' is the line after the scrolled part. Normally it is Rows.
- * When scrolling region used 'off' is the offset from the top for the region.
- * 'row' and 'end' are relative to the start of the region.
+ * "end" is the line after the scrolled part. Normally it is Rows.
+ * When scrolling region used "off" is the offset from the top for the region.
+ * "row" and "end" are relative to the start of the region.
  *
  * return FAIL for failure, OK for success.
  */
@@ -3658,14 +3657,15 @@ screen_ins_lines(
     /*
      * FAIL if
      * - there is no valid screen
-     * - the screen has to be redrawn completely
      * - the line count is less than one
      * - the line count is more than 'ttyscroll'
+     * - "end" is more than "Rows" (safety check, should not happen)
      * - redrawing for a callback and there is a modeless selection
      * - there is a popup window
      */
      if (!screen_valid(TRUE)
 	     || line_count <= 0 || line_count > p_ttyscroll
+	     || end > Rows
 #ifdef FEAT_CLIPBOARD
 	     || (clip_star.state != SELECT_CLEARED
 						 && redrawing_for_callback > 0)
@@ -3703,7 +3703,15 @@ screen_ins_lines(
      */
     result_empty = (row + line_count >= end);
     if (wp != NULL && wp->w_width != Columns && *T_CSV == NUL)
+    {
+	// Avoid that lines are first cleared here and then redrawn, which
+	// results in many characters updated twice.  This happens with CTRL-F
+	// in a vertically split window.  With line-by-line scrolling
+	// USE_REDRAW should be faster.
+	if (line_count > 3)
+	    return FAIL;
 	type = USE_REDRAW;
+    }
     else if (can_clear(T_CD) && result_empty)
 	type = USE_T_CD;
     else if (*T_CAL != NUL && (line_count > 1 || *T_AL == NUL))
@@ -3875,7 +3883,7 @@ screen_del_lines(
     int		end,
     int		force,		// even when line_count > p_ttyscroll
     int		clear_attr,	// used for clearing lines
-    win_T	*wp UNUSED)	// NULL or window to use width from
+    win_T	*wp)		// NULL or window to use width from
 {
     int		j;
     int		i;
@@ -3893,13 +3901,15 @@ screen_del_lines(
      * - the screen has to be redrawn completely
      * - the line count is less than one
      * - the line count is more than 'ttyscroll'
+     * - "end" is more than "Rows" (safety check, should not happen)
      * - redrawing for a callback and there is a modeless selection
      */
-    if (!screen_valid(TRUE) || line_count <= 0
-					|| (!force && line_count > p_ttyscroll)
+    if (!screen_valid(TRUE)
+	    || line_count <= 0
+	    || (!force && line_count > p_ttyscroll)
+	    || end > Rows
 #ifdef FEAT_CLIPBOARD
-	     || (clip_star.state != SELECT_CLEARED
-						 && redrawing_for_callback > 0)
+	    || (clip_star.state != SELECT_CLEARED && redrawing_for_callback > 0)
 #endif
        )
 	return FAIL;
@@ -3928,7 +3938,15 @@ screen_del_lines(
      * 6. redraw the characters from ScreenLines[].
      */
     if (wp != NULL && wp->w_width != Columns && *T_CSV == NUL)
+    {
+	// Avoid that lines are first cleared here and then redrawn, which
+	// results in many characters updated twice.  This happens with CTRL-F
+	// in a vertically split window.  With line-by-line scrolling
+	// USE_REDRAW should be faster.
+	if (line_count > 3)
+	    return FAIL;
 	type = USE_REDRAW;
+    }
     else if (can_clear(T_CD) && result_empty)
 	type = USE_T_CD;
     else if (row == 0 && (
@@ -4142,7 +4160,7 @@ showmode(void)
     int		sub_attr;
 
     do_mode = ((p_smd && msg_silent == 0)
-	    && ((State & INSERT)
+	    && ((State & MODE_INSERT)
 		|| restart_edit != NUL
 		|| VIsual_active));
     if (do_mode || reg_recording != 0)
@@ -4216,7 +4234,7 @@ showmode(void)
 		    msg_puts_attr(_(" VREPLACE"), attr);
 		else if (State & REPLACE_FLAG)
 		    msg_puts_attr(_(" REPLACE"), attr);
-		else if (State & INSERT)
+		else if (State & MODE_INSERT)
 		{
 #ifdef FEAT_RIGHTLEFT
 		    if (p_ri)
@@ -4236,7 +4254,7 @@ showmode(void)
 		    msg_puts_attr(_(" Hebrew"), attr);
 #endif
 #ifdef FEAT_KEYMAP
-		if (State & LANGMAP)
+		if (State & MODE_LANGMAP)
 		{
 # ifdef FEAT_ARABIC
 		    if (curwin->w_p_arab)
@@ -4248,7 +4266,7 @@ showmode(void)
 			    msg_puts_attr((char *)NameBuff, attr);
 		}
 #endif
-		if ((State & INSERT) && p_paste)
+		if ((State & MODE_INSERT) && p_paste)
 		    msg_puts_attr(_(" (paste)"), attr);
 
 		if (VIsual_active)
@@ -4813,11 +4831,13 @@ get_encoded_char_adv(char_u **p)
     char *
 set_chars_option(win_T *wp, char_u **varp)
 {
-    int		round, i, len, entries;
+    int		round, i, len, len2, entries;
     char_u	*p, *s;
     int		c1 = 0, c2 = 0, c3 = 0;
     char_u	*last_multispace = NULL; // Last occurrence of "multispace:"
+    char_u	*last_lmultispace = NULL; // Last occurrence of "leadmultispace:"
     int		multispace_len = 0;	 // Length of lcs-multispace string
+    int		lead_multispace_len = 0; // Length of lcs-leadmultispace string
     struct charstab
     {
 	int	*cp;
@@ -4884,6 +4904,7 @@ set_chars_option(win_T *wp, char_u **varp)
 	    {
 		lcs_chars.tab1 = NUL;
 		lcs_chars.tab3 = NUL;
+
 		if (multispace_len > 0)
 		{
 		    lcs_chars.multispace = ALLOC_MULT(int, multispace_len + 1);
@@ -4891,6 +4912,14 @@ set_chars_option(win_T *wp, char_u **varp)
 		}
 		else
 		    lcs_chars.multispace = NULL;
+
+		if (lead_multispace_len > 0)
+		{
+		    lcs_chars.leadmultispace = ALLOC_MULT(int, lead_multispace_len + 1);
+		    lcs_chars.leadmultispace[lead_multispace_len] = NUL;
+		}
+		else
+		    lcs_chars.leadmultispace = NULL;
 	    }
 	    else
 	    {
@@ -4954,6 +4983,7 @@ set_chars_option(win_T *wp, char_u **varp)
 	    if (i == entries)
 	    {
 		len = (int)STRLEN("multispace");
+		len2 = (int)STRLEN("leadmultispace");
 		if ((varp == &p_lcs || varp == &wp->w_p_lcs)
 			&& STRNCMP(p, "multispace", len) == 0
 			&& p[len] == ':'
@@ -4990,6 +5020,44 @@ set_chars_option(win_T *wp, char_u **varp)
 			p = s;
 		    }
 		}
+
+		else if ((varp == &p_lcs || varp == &wp->w_p_lcs)
+			&& STRNCMP(p, "leadmultispace", len2) == 0
+			&& p[len2] == ':'
+			&& p[len2 + 1] != NUL)
+		{
+		    s = p + len2 + 1;
+		    if (round == 0)
+		    {
+			// get length of lcs-leadmultispace string in first
+			// round
+			last_lmultispace = p;
+			lead_multispace_len = 0;
+			while (*s != NUL && *s != ',')
+			{
+			    c1 = get_encoded_char_adv(&s);
+			    if (char2cells(c1) > 1)
+				return e_invalid_argument;
+			    ++lead_multispace_len;
+			}
+			if (lead_multispace_len == 0)
+			    // lcs-leadmultispace cannot be an empty string
+			    return e_invalid_argument;
+			p = s;
+		    }
+		    else
+		    {
+			int multispace_pos = 0;
+
+			while (*s != NUL && *s != ',')
+			{
+			    c1 = get_encoded_char_adv(&s);
+			    if (p == last_lmultispace)
+				lcs_chars.leadmultispace[multispace_pos++] = c1;
+			}
+			p = s;
+		    }
+		}
 		else
 		    return e_invalid_argument;
 	    }
@@ -5000,11 +5068,10 @@ set_chars_option(win_T *wp, char_u **varp)
     }
     if (tab == lcstab)
     {
-	if (wp->w_lcs_chars.multispace != NULL)
-	    vim_free(wp->w_lcs_chars.multispace);
+	vim_free(wp->w_lcs_chars.multispace);
+	vim_free(wp->w_lcs_chars.leadmultispace);
 	wp->w_lcs_chars = lcs_chars;
     }
 
     return NULL;	// no error
 }
-

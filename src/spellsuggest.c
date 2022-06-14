@@ -23,13 +23,13 @@
  * vs "ht") and goes down in the list.
  * Used when 'spellsuggest' is set to "best".
  */
-#define RESCORE(word_score, sound_score) ((3 * word_score + sound_score) / 4)
+#define RESCORE(word_score, sound_score) ((3 * (word_score) + (sound_score)) / 4)
 
 /*
  * Do the opposite: based on a maximum end score and a known sound score,
  * compute the maximum word score that can be used.
  */
-#define MAXSCORE(word_score, sound_score) ((4 * word_score - sound_score) / 3)
+#define MAXSCORE(word_score, sound_score) ((4 * (word_score) - (sound_score)) / 3)
 
 // only used for su_badflags
 #define WF_MIXCAP   0x20	// mix of upper and lower case: macaRONI
@@ -70,7 +70,7 @@ typedef struct suggest_S
 #define SUG(ga, i) (((suggest_T *)(ga).ga_data)[i])
 
 // TRUE if a word appears in the list of banned words.
-#define WAS_BANNED(su, word) (!HASHITEM_EMPTY(hash_find(&su->su_banned, word)))
+#define WAS_BANNED(su, word) (!HASHITEM_EMPTY(hash_find(&(su)->su_banned, word)))
 
 // Number of suggestions kept when cleaning up.  We need to keep more than
 // what is displayed, because when rescore_suggestions() is called the score
@@ -118,7 +118,7 @@ typedef struct suggest_S
 #define SCORE_SFMAX2	300	// maximum score for second try
 #define SCORE_SFMAX3	400	// maximum score for third try
 
-#define SCORE_BIG	SCORE_INS * 3	// big difference
+#define SCORE_BIG	(SCORE_INS * 3)	// big difference
 #define SCORE_MAXMAX	999999		// accept any score
 #define SCORE_LIMITMAX	350		// for spell_edit_score_limit()
 
@@ -506,6 +506,10 @@ spell_suggest(int count)
 	    curwin->w_cursor.col = VIsual.col;
 	++badlen;
 	end_visual_mode();
+	// make sure we don't include the NUL at the end of the line
+	line = ml_get_curline();
+	if (badlen > (int)STRLEN(line) - (int)curwin->w_cursor.col)
+	    badlen = (int)STRLEN(line) - (int)curwin->w_cursor.col;
     }
     // Find the start of the badly spelled word.
     else if (spell_move_to(curwin, FORWARD, TRUE, TRUE, NULL) == 0
@@ -677,6 +681,8 @@ spell_suggest(int count)
 	p = alloc(STRLEN(line) - stp->st_orglen + stp->st_wordlen + 1);
 	if (p != NULL)
 	{
+	    int len_diff = stp->st_wordlen - stp->st_orglen;
+
 	    c = (int)(sug.su_badptr - line);
 	    mch_memmove(p, line, c);
 	    STRCPY(p + c, stp->st_word);
@@ -694,6 +700,9 @@ spell_suggest(int count)
 	    curwin->w_cursor.col = c;
 
 	    changed_bytes(curwin->w_cursor.lnum, c);
+	    if (curbuf->b_has_textprop && len_diff != 0)
+		adjust_prop_columns(curwin->w_cursor.lnum, c, len_diff,
+							       APC_SUBSTITUTE);
 	}
     }
     else
@@ -1214,7 +1223,7 @@ suggest_try_change(suginfo_T *su)
 
 // Check the maximum score, if we go over it we won't try this change.
 #define TRY_DEEPER(su, stack, depth, add) \
-	   (depth < MAXWLEN && stack[depth].ts_score + (add) < su->su_maxscore)
+       ((depth) < MAXWLEN - 1 && (stack)[depth].ts_score + (add) < (su)->su_maxscore)
 
 /*
  * Try finding suggestions by adding/removing/swapping letters.
@@ -1373,7 +1382,7 @@ suggest_trie_walk(
 
 		// At end of a prefix or at start of prefixtree: check for
 		// following word.
-		if (depth < MAXWLEN
+		if (depth < MAXWLEN - 1
 			    && (byts[arridx] == 0 || n == (int)STATE_NOPREFIX))
 		{
 		    // Set su->su_badflags to the caps type at this position.
@@ -1944,7 +1953,8 @@ suggest_trie_walk(
 #endif
 		    ++depth;
 		    sp = &stack[depth];
-		    ++sp->ts_fidx;
+		    if (fword[sp->ts_fidx] != NUL)
+			++sp->ts_fidx;
 		    tword[sp->ts_twordlen++] = c;
 		    sp->ts_arridx = idxs[arridx];
 		    if (newscore == SCORE_SUBST)
@@ -3077,7 +3087,7 @@ typedef struct
 } sftword_T;
 
 static sftword_T dumsft;
-#define HIKEY2SFT(p)  ((sftword_T *)(p - (dumsft.sft_word - (char_u *)&dumsft)))
+#define HIKEY2SFT(p)  ((sftword_T *)((p) - (dumsft.sft_word - (char_u *)&dumsft)))
 #define HI2SFT(hi)     HIKEY2SFT((hi)->hi_key)
 
 /*
@@ -3129,11 +3139,11 @@ suggest_try_soundalike(suginfo_T *su)
 	    // TODO: also soundfold the next words, so that we can try joining
 	    // and splitting
 #ifdef SUGGEST_PROFILE
-	prof_init();
+	    prof_init();
 #endif
 	    suggest_trie_walk(su, lp, salword, TRUE);
 #ifdef SUGGEST_PROFILE
-	prof_report("soundalike");
+	    prof_report("soundalike");
 #endif
 	}
     }

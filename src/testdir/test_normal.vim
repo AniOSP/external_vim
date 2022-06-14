@@ -3,7 +3,7 @@
 source shared.vim
 source check.vim
 source view_util.vim
-source vim9.vim
+import './vim9.vim' as v9
 
 func Setup_NewWindow()
   10new
@@ -626,7 +626,7 @@ func Test_opfunc_callback()
     normal! g@l
     call assert_equal([23, 'char'], g:OpFunc1Args)
   END
-  call CheckTransLegacySuccess(lines)
+  call v9.CheckTransLegacySuccess(lines)
 
   " Test for using a script-local function name
   func s:OpFunc3(type)
@@ -684,16 +684,16 @@ func Test_opfunc_callback()
     bw!
 
     # Test for using a script-local function name
-    def s:LocalOpFunc(type: string): void
+    def LocalOpFunc(type: string): void
       g:LocalOpFuncArgs = [type]
     enddef
-    &opfunc = s:LocalOpFunc
+    &opfunc = LocalOpFunc
     g:LocalOpFuncArgs = []
     normal! g@l
     assert_equal(['char'], g:LocalOpFuncArgs)
     bw!
   END
-  call CheckScriptSuccess(lines)
+  call v9.CheckScriptSuccess(lines)
 
   " setting 'opfunc' to a script local function outside of a script context
   " should fail
@@ -2641,6 +2641,15 @@ func Test_normal33_g_cmd2()
   bw!
 endfunc
 
+func Test_normal_ex_substitute()
+  " This was hanging on the substitute prompt.
+  new
+  call setline(1, 'a')
+  exe "normal! gggQs/a/b/c\<CR>"
+  call assert_equal('a', getline(1))
+  bwipe!
+endfunc
+
 " Test for g CTRL-G
 func Test_g_ctrl_g()
   new
@@ -3217,31 +3226,6 @@ func Test_gr_command()
   call assert_fails('normal! gRx', 'E21:')
   set modifiable&
   enew!
-endfunc
-
-" When splitting a window the changelist position is wrong.
-" Test the changelist position after splitting a window.
-" Test for the bug fixed by 7.4.386
-func Test_changelist()
-  let save_ul = &ul
-  enew!
-  call append('$', ['1', '2'])
-  exe "normal i\<C-G>u"
-  exe "normal Gkylpa\<C-G>u"
-  set ul=100
-  exe "normal Gylpa\<C-G>u"
-  set ul=100
-  normal gg
-  vsplit
-  normal g;
-  call assert_equal([3, 2], [line('.'), col('.')])
-  normal g;
-  call assert_equal([2, 2], [line('.'), col('.')])
-  call assert_fails('normal g;', 'E662:')
-  new
-  call assert_fails('normal g;', 'E664:')
-  %bwipe!
-  let &ul = save_ul
 endfunc
 
 func Test_nv_hat_count()

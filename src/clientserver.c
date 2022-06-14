@@ -420,7 +420,7 @@ cmdsrv_main(
 	     * For --remote-wait: Wait until the server did edit each
 	     * file.  Also detect that the server no longer runs.
 	     */
-	    if (ret >= 0 && argtype == ARGTYPE_EDIT_WAIT)
+	    if (argtype == ARGTYPE_EDIT_WAIT)
 	    {
 		int	numFiles = *argc - i - 1;
 		int	j;
@@ -651,7 +651,7 @@ build_drop_cmd(
     ga_concat(&ga, (char_u *)":");
     if (inicmd != NULL)
     {
-	// Can't use <CR> after "inicmd", because an "startinsert" would cause
+	// Can't use <CR> after "inicmd", because a "startinsert" would cause
 	// the following commands to be inserted as text.  Use a "|",
 	// hopefully "inicmd" does allow this...
 	ga_concat(&ga, inicmd);
@@ -794,6 +794,7 @@ f_remote_expr(typval_T *argvars UNUSED, typval_T *rettv)
     rettv->v_type = VAR_STRING;
     rettv->vval.v_string = NULL;
 
+#ifdef FEAT_CLIENTSERVER
     if (in_vim9script()
 	    && (check_for_string_arg(argvars, 0) == FAIL
 		|| check_for_string_arg(argvars, 1) == FAIL
@@ -802,7 +803,6 @@ f_remote_expr(typval_T *argvars UNUSED, typval_T *rettv)
 		    && check_for_opt_number_arg(argvars, 3) == FAIL)))
 	return;
 
-#ifdef FEAT_CLIENTSERVER
     remote_common(argvars, rettv, TRUE);
 #endif
 }
@@ -945,13 +945,13 @@ f_remote_send(typval_T *argvars UNUSED, typval_T *rettv)
     rettv->v_type = VAR_STRING;
     rettv->vval.v_string = NULL;
 
+#ifdef FEAT_CLIENTSERVER
     if (in_vim9script()
 	    && (check_for_string_arg(argvars, 0) == FAIL
 		|| check_for_string_arg(argvars, 1) == FAIL
 		|| check_for_opt_string_arg(argvars, 2) == FAIL))
 	return;
 
-#ifdef FEAT_CLIENTSERVER
     remote_common(argvars, rettv, FALSE);
 #endif
 }

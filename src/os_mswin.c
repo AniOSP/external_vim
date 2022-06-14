@@ -440,6 +440,27 @@ slash_adjust(char_u *p)
 #define _fstat _fstat64
 
     static int
+read_reparse_point(const WCHAR *name, char_u *buf, DWORD *buf_len)
+{
+    HANDLE h;
+    BOOL ok;
+
+    h = CreateFileW(name, FILE_READ_ATTRIBUTES,
+	    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+	    OPEN_EXISTING,
+	    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+	    NULL);
+    if (h == INVALID_HANDLE_VALUE)
+	return FAIL;
+
+    ok = DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, NULL, 0, buf, *buf_len,
+	    buf_len, NULL);
+    CloseHandle(h);
+
+    return ok ? OK : FAIL;
+}
+
+    static int
 wstat_symlink_aware(const WCHAR *name, stat_T *stp)
 {
 #if (defined(_MSC_VER) && (_MSC_VER < 1900)) || defined(__MINGW32__)
@@ -489,6 +510,61 @@ wstat_symlink_aware(const WCHAR *name, stat_T *stp)
     }
 #endif
     return _wstat(name, (struct _stat *)stp);
+}
+
+    char_u *
+resolve_appexeclink(char_u *fname)
+{
+    DWORD		attr = 0;
+    int			idx;
+    WCHAR		*p, *end, *wname;
+    // The buffer size is arbitrarily chosen to be "big enough" (TM), the
+    // ceiling should be around 16k.
+    char_u		buf[4096];
+    DWORD		buf_len = sizeof(buf);
+    REPARSE_DATA_BUFFER *rb = (REPARSE_DATA_BUFFER *)buf;
+
+    wname = enc_to_utf16(fname, NULL);
+    if (wname == NULL)
+	return NULL;
+
+    attr = GetFileAttributesW(wname);
+    if (attr == INVALID_FILE_ATTRIBUTES ||
+	    (attr & FILE_ATTRIBUTE_REPARSE_POINT) == 0)
+    {
+	vim_free(wname);
+	return NULL;
+    }
+
+    // The applinks are similar to symlinks but with a huge difference: they can
+    // only be executed, any other I/O operation on them is bound to fail with
+    // ERROR_FILE_NOT_FOUND even though the file exists.
+    if (read_reparse_point(wname, buf, &buf_len) == FAIL)
+    {
+	vim_free(wname);
+	return NULL;
+    }
+    vim_free(wname);
+
+    if (rb->ReparseTag != IO_REPARSE_TAG_APPEXECLINK)
+	return NULL;
+
+    // The (undocumented) reparse buffer contains a set of N null-terminated
+    // Unicode strings, the application path is stored in the third one.
+    if (rb->AppExecLinkReparseBuffer.StringCount < 3)
+	return NULL;
+
+    p = rb->AppExecLinkReparseBuffer.StringList;
+    end = p + rb->ReparseDataLength / sizeof(WCHAR);
+    for (idx = 0; p < end
+	    && idx < (int)rb->AppExecLinkReparseBuffer.StringCount
+	    && idx != 2; )
+    {
+	if (*p++ == L'\0')
+	    ++idx;
+    }
+
+    return utf16_to_enc(p, NULL);
 }
 
 /*
@@ -588,7 +664,7 @@ mch_suspend(void)
 display_errors(void)
 {
 # ifdef FEAT_GUI
-    char *p;
+    char_u *p;
 
 #  ifdef VIMDLL
     if (gui.in_use || gui.starting)
@@ -597,15 +673,18 @@ display_errors(void)
 	if (error_ga.ga_data != NULL)
 	{
 	    // avoid putting up a message box with blanks only
-	    for (p = (char *)error_ga.ga_data; *p; ++p)
+	    for (p = (char_u *)error_ga.ga_data; *p; ++p)
 		if (!isspace(*p))
 		{
-		    (void)gui_mch_dialog(
+		    // Only use a dialog when not using --gui-dialog-file:
+		    // write text to a file.
+		    if (!gui_dialog_log((char_u *)"Errors", p))
+			(void)gui_mch_dialog(
 				     gui.starting ? VIM_INFO :
 					     VIM_ERROR,
 				     gui.starting ? (char_u *)_("Message") :
 					     (char_u *)_("Error"),
-				     (char_u *)p, (char_u *)_("&Ok"),
+					     p, (char_u *)_("&Ok"),
 					1, NULL, FALSE);
 		    break;
 		}

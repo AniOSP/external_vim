@@ -81,7 +81,7 @@ typedef struct syn_pattern
 
 #define SYN_ITEMS(buf)	((synpat_T *)((buf)->b_syn_patterns.ga_data))
 
-#define NONE_IDX	-2	// value of sp_sync_idx for "NONE"
+#define NONE_IDX	(-2)	// value of sp_sync_idx for "NONE"
 
 /*
  * Flags for b_syn_sync_flags:
@@ -207,8 +207,8 @@ typedef struct state_item
 					// pattern
 } stateitem_T;
 
-#define KEYWORD_IDX	-1	    // value of si_idx for keywords
-#define ID_LIST_ALL	(short *)-1 // valid of si_cont_list for containing all
+#define KEYWORD_IDX	(-1)	    // value of si_idx for keywords
+#define ID_LIST_ALL	((short *)-1) // valid of si_cont_list for containing all
 				    // but contained groups
 
 #ifdef FEAT_CONCEAL
@@ -266,9 +266,6 @@ static reg_extmatch_T *next_match_extmatch = NULL;
 static win_T	*syn_win;		// current window for highlighting
 static buf_T	*syn_buf;		// current buffer for highlighting
 static synblock_T *syn_block;		// current buffer for highlighting
-#ifdef FEAT_RELTIME
-static proftime_T *syn_tm;		// timeout limit
-#endif
 static linenr_T current_lnum = 0;	// lnum of current state
 static colnr_T	current_col = 0;	// column of current state
 static int	current_state_stored = 0; // TRUE if stored current state
@@ -349,18 +346,6 @@ static void init_syn_patterns(void);
 static char_u *get_syn_pattern(char_u *arg, synpat_T *ci);
 static int get_id_list(char_u **arg, int keylen, short **list, int skip);
 static void syn_combine_list(short **clstr1, short **clstr2, int list_op);
-
-#if defined(FEAT_RELTIME) || defined(PROTO)
-/*
- * Set the timeout used for syntax highlighting.
- * Use NULL to reset, no timeout.
- */
-    void
-syn_set_timeout(proftime_T *tm)
-{
-    syn_tm = tm;
-}
-#endif
 
 /*
  * Start the syntax recognition for a line.  This function is normally called
@@ -2504,55 +2489,53 @@ check_state_ends(void)
 		next_match_col = MAXCOL;
 		break;
 	    }
-	    else
+
+	    // handle next_list, unless at end of line and no "skipnl" or
+	    // "skipempty"
+	    current_next_list = cur_si->si_next_list;
+	    current_next_flags = cur_si->si_flags;
+	    if (!(current_next_flags & (HL_SKIPNL | HL_SKIPEMPTY))
+		    && syn_getcurline()[current_col] == NUL)
+		current_next_list = NULL;
+
+	    // When the ended item has "extend", another item with
+	    // "keepend" now needs to check for its end.
+	    had_extend = (cur_si->si_flags & HL_EXTEND);
+
+	    pop_current_state();
+
+	    if (current_state.ga_len == 0)
+		break;
+
+	    if (had_extend && keepend_level >= 0)
 	    {
-		// handle next_list, unless at end of line and no "skipnl" or
-		// "skipempty"
-		current_next_list = cur_si->si_next_list;
-		current_next_flags = cur_si->si_flags;
-		if (!(current_next_flags & (HL_SKIPNL | HL_SKIPEMPTY))
-			&& syn_getcurline()[current_col] == NUL)
-		    current_next_list = NULL;
-
-		// When the ended item has "extend", another item with
-		// "keepend" now needs to check for its end.
-		 had_extend = (cur_si->si_flags & HL_EXTEND);
-
-		pop_current_state();
-
+		syn_update_ends(FALSE);
 		if (current_state.ga_len == 0)
 		    break;
+	    }
 
-		if (had_extend && keepend_level >= 0)
-		{
-		    syn_update_ends(FALSE);
-		    if (current_state.ga_len == 0)
-			break;
-		}
+	    cur_si = &CUR_STATE(current_state.ga_len - 1);
 
-		cur_si = &CUR_STATE(current_state.ga_len - 1);
-
-		/*
-		 * Only for a region the search for the end continues after
-		 * the end of the contained item.  If the contained match
-		 * included the end-of-line, break here, the region continues.
-		 * Don't do this when:
-		 * - "keepend" is used for the contained item
-		 * - not at the end of the line (could be end="x$"me=e-1).
-		 * - "excludenl" is used (HL_HAS_EOL won't be set)
-		 */
-		if (cur_si->si_idx >= 0
-			&& SYN_ITEMS(syn_block)[cur_si->si_idx].sp_type
-							       == SPTYPE_START
-			&& !(cur_si->si_flags & (HL_MATCH | HL_KEEPEND)))
-		{
-		    update_si_end(cur_si, (int)current_col, TRUE);
-		    check_keepend();
-		    if ((current_next_flags & HL_HAS_EOL)
-			    && keepend_level < 0
-			    && syn_getcurline()[current_col] == NUL)
-			break;
-		}
+	    /*
+	     * Only for a region the search for the end continues after
+	     * the end of the contained item.  If the contained match
+	     * included the end-of-line, break here, the region continues.
+	     * Don't do this when:
+	     * - "keepend" is used for the contained item
+	     * - not at the end of the line (could be end="x$"me=e-1).
+	     * - "excludenl" is used (HL_HAS_EOL won't be set)
+	     */
+	    if (cur_si->si_idx >= 0
+		    && SYN_ITEMS(syn_block)[cur_si->si_idx].sp_type
+								== SPTYPE_START
+		    && !(cur_si->si_flags & (HL_MATCH | HL_KEEPEND)))
+	    {
+		update_si_end(cur_si, (int)current_col, TRUE);
+		check_keepend();
+		if ((current_next_flags & HL_HAS_EOL)
+			&& keepend_level < 0
+			&& syn_getcurline()[current_col] == NUL)
+		    break;
 	    }
 	}
 	else
@@ -3168,9 +3151,7 @@ syn_regexec(
     syn_time_T  *st UNUSED)
 {
     int r;
-#ifdef FEAT_RELTIME
     int timed_out = FALSE;
-#endif
 #ifdef FEAT_PROFILE
     proftime_T	pt;
 
@@ -3185,13 +3166,7 @@ syn_regexec(
 	return FALSE;
 
     rmp->rmm_maxcol = syn_buf->b_p_smc;
-    r = vim_regexec_multi(rmp, syn_win, syn_buf, lnum, col,
-#ifdef FEAT_RELTIME
-	    syn_tm, &timed_out
-#else
-	    NULL, NULL
-#endif
-	    );
+    r = vim_regexec_multi(rmp, syn_win, syn_buf, lnum, col, &timed_out);
 
 #ifdef FEAT_PROFILE
     if (syn_time_on)
@@ -3329,9 +3304,9 @@ syn_cmd_conceal(exarg_T *eap UNUSED, int syncing UNUSED)
     if (*arg == NUL)
     {
 	if (curwin->w_s->b_syn_conceal)
-	    msg(_("syntax conceal on"));
+	    msg("syntax conceal on");
 	else
-	    msg(_("syntax conceal off"));
+	    msg("syntax conceal off");
     }
     else if (STRNICMP(arg, "on", 2) == 0 && next - arg == 2)
 	curwin->w_s->b_syn_conceal = TRUE;
@@ -3359,9 +3334,9 @@ syn_cmd_case(exarg_T *eap, int syncing UNUSED)
     if (*arg == NUL)
     {
 	if (curwin->w_s->b_syn_ic)
-	    msg(_("syntax case ignore"));
+	    msg("syntax case ignore");
 	else
-	    msg(_("syntax case match"));
+	    msg("syntax case match");
     }
     else if (STRNICMP(arg, "match", 5) == 0 && next - arg == 5)
 	curwin->w_s->b_syn_ic = FALSE;
@@ -3388,8 +3363,8 @@ syn_cmd_foldlevel(exarg_T *eap, int syncing UNUSED)
     {
 	switch (curwin->w_s->b_syn_foldlevel)
 	{
-	    case SYNFLD_START:   msg(_("syntax foldlevel start"));   break;
-	    case SYNFLD_MINIMUM: msg(_("syntax foldlevel minimum")); break;
+	    case SYNFLD_START:   msg("syntax foldlevel start");   break;
+	    case SYNFLD_MINIMUM: msg("syntax foldlevel minimum"); break;
 	    default: break;
 	}
 	return;
@@ -3430,11 +3405,11 @@ syn_cmd_spell(exarg_T *eap, int syncing UNUSED)
     if (*arg == NUL)
     {
 	if (curwin->w_s->b_syn_spell == SYNSPL_TOP)
-	    msg(_("syntax spell toplevel"));
+	    msg("syntax spell toplevel");
 	else if (curwin->w_s->b_syn_spell == SYNSPL_NOTOP)
-	    msg(_("syntax spell notoplevel"));
+	    msg("syntax spell notoplevel");
 	else
-	    msg(_("syntax spell default"));
+	    msg("syntax spell default");
     }
     else if (STRNICMP(arg, "toplevel", 8) == 0 && next - arg == 8)
 	curwin->w_s->b_syn_spell = SYNSPL_TOP;
@@ -3471,7 +3446,7 @@ syn_cmd_iskeyword(exarg_T *eap, int syncing UNUSED)
 	msg_puts("\n");
 	if (curwin->w_s->b_syn_isk != empty_option)
 	{
-	    msg_puts(_("syntax iskeyword "));
+	    msg_puts("syntax iskeyword ");
 	    msg_outtrans(curwin->w_s->b_syn_isk);
 	}
 	else
@@ -4764,7 +4739,7 @@ syn_cmd_include(exarg_T *eap, int syncing UNUSED)
      * filename to include.
      */
     eap->argt |= (EX_XFILE | EX_NOSPC);
-    separate_nextcmd(eap);
+    separate_nextcmd(eap, FALSE);
     if (*eap->arg == '<' || *eap->arg == '$' || mch_isFullName(eap->arg))
     {
 	// For an absolute path, "$VIM/..." or "<sfile>.." we ":source" the
@@ -6488,8 +6463,9 @@ syn_get_id(
     int		keep_state)  // keep state of char at "col"
 {
     // When the position is not after the current position and in the same
-    // line of the same buffer, need to restart parsing.
-    if (wp->w_buffer != syn_buf
+    // line of the same window with the same buffer, need to restart parsing.
+    if (wp != syn_win
+	    || wp->w_buffer != syn_buf
 	    || lnum != current_lnum
 	    || col < current_col)
 	syntax_start(wp, lnum);

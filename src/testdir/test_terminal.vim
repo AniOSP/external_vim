@@ -715,7 +715,8 @@ endfunction
 func Test_terminal_noblock()
   let g:test_is_flaky = 1
   let buf = term_start(&shell)
-  let wait_time = 5000
+  " Starting a terminal can be slow, esp. on busy CI machines.
+  let wait_time = 7500
   let letters = 'abcdefghijklmnopqrstuvwxyz'
   if has('bsd') || has('mac') || has('sun')
     " The shell or something else has a problem dealing with more than 1000
@@ -934,7 +935,7 @@ func TerminalTmap(remap)
   tunmap 123
   tunmap 456
   call assert_equal('', maparg('123', 't'))
-  close
+  exe buf . 'bwipe'
   unlet g:job
 endfunc
 
@@ -1137,18 +1138,15 @@ func Test_aa_terminal_focus_events()
 
   " Send a focus event to ourselves, it should be forwarded to the terminal
   call feedkeys("\<Esc>[O", "Lx!")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_terminal_focus_1', {})
 
   call feedkeys("\<Esc>[I", "Lx!")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_terminal_focus_2', {})
 
   " check that a command line being edited is redrawn in place
   call term_sendkeys(buf, ":" .. repeat('x', 80))
   call TermWait(buf)
   call feedkeys("\<Esc>[O", "Lx!")
-  call TermWait(buf)
   call VerifyScreenDump(buf, 'Test_terminal_focus_3', {})
   call term_sendkeys(buf, "\<Esc>")
 
@@ -1220,6 +1218,9 @@ endfunc
 " argument, check that :confirm qall works.
 func Test_terminal_qall_prompt()
   CheckRunVimInTerminal
+
+  " the shell may set the window title, we don't want that here
+  call test_override('vterm_title', 1)
   let buf = RunVimInTerminal('', {})
 
   " Open a terminal window and wait for the prompt to appear
@@ -1235,6 +1236,7 @@ func Test_terminal_qall_prompt()
 
   " close the terminal window where Vim was running
   quit
+  call test_override('ALL', 0)
 endfunc
 
 " Run Vim in a terminal, then start a terminal window with a shell and check
@@ -2014,10 +2016,16 @@ func Test_terminal_ansicolors_global()
   CheckFeature termguicolors
   CheckFunction term_getansicolors
 
+  if has('vtp') && !has('vcon') && !has('gui_running')
+    throw 'Skipped: does not support termguicolors'
+  endif
+
+  set tgc
   let g:terminal_ansi_colors = reverse(copy(s:test_colors))
   let buf = Run_shell_in_terminal({})
   call assert_equal(g:terminal_ansi_colors, term_getansicolors(buf))
   call StopShellInTerminal(buf)
+  set tgc&
 
   exe buf . 'bwipe'
   unlet g:terminal_ansi_colors
@@ -2027,6 +2035,11 @@ func Test_terminal_ansicolors_func()
   CheckFeature termguicolors
   CheckFunction term_getansicolors
 
+  if has('vtp') && !has('vcon') && !has('gui_running')
+    throw 'Skipped: does not support termguicolors'
+  endif
+
+  set tgc
   let g:terminal_ansi_colors = reverse(copy(s:test_colors))
   let buf = Run_shell_in_terminal({'ansi_colors': s:test_colors})
   call assert_equal(s:test_colors, term_getansicolors(buf))
@@ -2049,6 +2062,7 @@ func Test_terminal_ansicolors_func()
   let colors[4] = 'Invalid'
   call assert_fails('call term_setansicolors(buf, colors)', 'E254:')
   call assert_fails('call term_setansicolors(buf, {})', 'E714:')
+  set tgc&
 
   call StopShellInTerminal(buf)
   call assert_equal(0, term_setansicolors(buf, []))

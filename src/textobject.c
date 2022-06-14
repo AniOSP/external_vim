@@ -1133,8 +1133,10 @@ current_block(
 	/*
 	 * In Visual mode, when the resulting area is not bigger than what we
 	 * started with, extend it to the next block, and then exclude again.
+	 * Don't try to expand the area if the area is empty.
 	 */
 	if (!LT_POS(start_pos, old_start) && !LT_POS(old_end, curwin->w_cursor)
+		&& !EQUAL_POS(start_pos, curwin->w_cursor)
 		&& VIsual_active)
 	{
 	    curwin->w_cursor = old_start;
@@ -1664,7 +1666,11 @@ find_next_quote(
 	if (c == NUL)
 	    return -1;
 	else if (escape != NULL && vim_strchr(escape, c))
+	{
 	    ++col;
+	    if (line[col] == NUL)
+		return -1;
+	}
 	else if (c == quotechar)
 	    break;
 	if (has_mbyte)
