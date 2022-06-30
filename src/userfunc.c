@@ -32,6 +32,7 @@ static funccall_T *previous_funccal = NULL;
 static void funccal_unref(funccall_T *fc, ufunc_T *fp, int force);
 static void func_clear(ufunc_T *fp, int force);
 static int func_free(ufunc_T *fp, int force);
+static char_u *untrans_function_name(char_u *name);
 
     void
 func_init()
@@ -3021,6 +3022,15 @@ call_user_func_check(
 {
     int error;
 
+#ifdef FEAT_LUA
+    if (fp->uf_flags & FC_CFUNC)
+    {
+	cfunc_T cb = fp->uf_cb;
+
+	return (*cb)(argcount, argvars, rettv, fp->uf_cb_state);
+    }
+#endif
+
     if (fp->uf_flags & FC_RANGE && funcexe->fe_doesrange != NULL)
 	*funcexe->fe_doesrange = TRUE;
     error = check_user_func_argcount(fp, argcount);
@@ -3584,14 +3594,6 @@ call_func(
 
 	    if (fp != NULL && (fp->uf_flags & FC_DELETED))
 		error = FCERR_DELETED;
-#ifdef FEAT_LUA
-	    else if (fp != NULL && (fp->uf_flags & FC_CFUNC))
-	    {
-		cfunc_T cb = fp->uf_cb;
-
-		error = (*cb)(argcount, argvars, rettv, fp->uf_cb_state);
-	    }
-#endif
 	    else if (fp != NULL)
 	    {
 		if (funcexe->fe_argv_func != NULL)
@@ -4072,7 +4074,7 @@ theend:
  * This can be used to first search for a script-local function and fall back
  * to the global function if not found.
  */
-    char_u *
+    static char_u *
 untrans_function_name(char_u *name)
 {
     char_u *p;

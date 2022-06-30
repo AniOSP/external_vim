@@ -1855,8 +1855,17 @@ screen_start_highlight(int attr)
 		out_str(T_SO);
 	    if ((attr & HL_UNDERCURL) && *T_UCS != NUL) // undercurl
 		out_str(T_UCS);
-	    if (((attr & HL_UNDERLINE)	    // underline or undercurl
-			|| ((attr & HL_UNDERCURL) && *T_UCS == NUL))
+	    if ((attr & HL_UNDERDOUBLE) && *T_USS != NUL) // double underline
+		out_str(T_USS);
+	    if ((attr & HL_UNDERDOTTED) && *T_DS != NUL) // dotted underline
+		out_str(T_DS);
+	    if ((attr & HL_UNDERDASHED) && *T_CDS != NUL) // dashed underline
+		out_str(T_CDS);
+	    if (((attr & HL_UNDERLINE)	    // underline or undercurl, etc.
+			|| ((attr & HL_UNDERCURL) && *T_UCS == NUL)
+			|| ((attr & HL_UNDERDOUBLE) && *T_USS == NUL)
+			|| ((attr & HL_UNDERDOTTED) && *T_DS == NUL)
+			|| ((attr & HL_UNDERDASHED) && *T_CDS == NUL))
 		    && *T_US != NUL)
 		out_str(T_US);
 	    if ((attr & HL_ITALIC) && *T_CZH != NUL)	// italic
@@ -1951,6 +1960,8 @@ screen_stop_highlight(void)
 	else
 #endif
 	{
+	    int is_under;
+
 	    if (screen_attr > HL_ALL)			// special HL attr.
 	    {
 		attrentry_T *aep;
@@ -2030,15 +2041,16 @@ screen_stop_highlight(void)
 		else
 		    out_str(T_SE);
 	    }
-	    if ((screen_attr & HL_UNDERCURL) && *T_UCE != NUL)
+	    is_under = (screen_attr & (HL_UNDERCURL
+			  | HL_UNDERDOUBLE | HL_UNDERDOTTED | HL_UNDERDASHED));
+	    if (is_under && *T_UCE != NUL)
 	    {
 		if (STRCMP(T_UCE, T_ME) == 0)
 		    do_ME = TRUE;
 		else
 		    out_str(T_UCE);
 	    }
-	    if ((screen_attr & HL_UNDERLINE)
-			    || ((screen_attr & HL_UNDERCURL) && *T_UCE == NUL))
+	    if ((screen_attr & HL_UNDERLINE) || (is_under && *T_UCE == NUL))
 	    {
 		if (STRCMP(T_UE, T_ME) == 0)
 		    do_ME = TRUE;
@@ -3395,7 +3407,12 @@ win_ins_lines(
     if (invalid)
 	wp->w_lines_valid = 0;
 
+    // with only a few lines it's not worth the effort
     if (wp->w_height < 5)
+	return FAIL;
+
+    // with the popup menu visible this might not work correctly
+    if (pum_visible())
 	return FAIL;
 
     if (line_count > wp->w_height - row)
@@ -4128,7 +4145,7 @@ screen_del_lines(
 skip_showmode()
 {
     // Call char_avail() only when we are going to show something, because it
-    // takes a bit of time.  redrawing() may also call char_avail_avail().
+    // takes a bit of time.  redrawing() may also call char_avail().
     if (global_busy
 	    || msg_silent != 0
 	    || !redrawing()

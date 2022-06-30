@@ -1,4 +1,4 @@
-*todo.txt*      For Vim version 8.2.  Last change: 2022 Jun 12
+*todo.txt*      For Vim version 9.0.  Last change: 2022 Jun 27
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -38,18 +38,11 @@ browser use: https://github.com/vim/vim/issues/1234
 							*known-bugs*
 -------------------- Known bugs and current work -----------------------
 
-searchpair() must call function to set timeout, not pass the time limit down
-(and set it many times).  #10562
-
-Prepare for Vim 9.0 release:
-- Update the user manual:
-  - Add more to usr_50.txt as an "advanced section" of usr_41.txt
-  - Move some from vim9.txt to the user manual?  Keep the specification.
-- Use Vim9 for more runtime files.
-- Make popup-examples use Vim9 script  Issue #10499
-- Adjust intro message to say "help version9".
+Prepare for the Vim 9.0 release:
+- Update version number in help
 
 Further Vim9 improvements, possibly after launch:
+- Use Vim9 for more runtime files.
 - Check performance with callgrind and kcachegrind.
     getline()/substitute()/setline() in #5632
 - Better implementation for partial and tests for that.
@@ -80,12 +73,13 @@ Further Vim9 improvements, possibly after launch:
 Update list of features to vote on:
 - multiple cursors
 - built-in LSP support
-- start first line halfway
+- virtual text, using text properties
+- start first line halfway, scroll per screen line
 
 Popup windows:
 - Preview popup not properly updated when it overlaps with completion menu.
   (Yegappan Lakshmanan, 2021 May 22)
-- Srollbar thumb sometimes not visible  #10492
+- Scrollbar thumb sometimes not visible  #10492
 - Add a function to redraw a specific popup window.  Esp. to be used when
   editing the command line, when screen updating doesn't happen. (Shougo)
 - Add a flag to make a popup window focusable?
@@ -206,8 +200,22 @@ Terminal emulator window:
 - When 'encoding' is not utf-8, or the job is using another encoding, setup
   conversions.
 
+Patches considered for including:
+- make functions static if possible, add a few tests. #10612
+- use ngettext() in a few more places #10606
+- move f_hasmapto() to map.c  #10611
+- allow for nesting of timeout, sketch in #10595
+- Add "-n" option to xxd. #10599
+- Add support for "underdouble", "underdot" and "underdash". #9553
+- Patch to implement the vimtutor with a plugin: #6414
+  Was originally written by Felipe Morales.
+- Patch to make fillchars global-local. (#5206)
+- Version of getchar() that does not move the cursor - #10603
+  Use a separate argument for the new flag.
+- Improved VB filetype detection. (Doug Kearns, June 26)
+- Improved FreeBasic runtime files (and a second one). (Doug Kearns, June 26)
+
 Autoconf: must use autoconf 2.69, later version generates lots of warnings
-    attempt in ~/tmp/configure.ac
 - try using autoconf 2.71 and fix all "obsolete" warnings
 
 Can deref_func_name() and deref_function_name() be merged?
@@ -228,32 +236,12 @@ pass it on with modifications.
 
 Can "CSI nr X" be used instead of outputting spaces?  Is it faster?  #8002
 
-Valgrind reports memory leaks in test_options.
-Valgrind reports overlapping memcpy in
-    test_conceal.3
-    test_edit.1
-    test_functions.4
-    test_ins_complete.3
-    test_method
-    test_normal
-    test_popupwin.35 et al.
-    test_search_stat
-Memory leak in test_debugger
-Memory leak in test_paste, using XtOpenDisplay several times
-OLD:
-TODO: be able to run all parts of test_alot with valgrind separately
-Memory leak in test_alot with pyeval() (allocating partial)
-Memory leak in test_alot with expand()
-Memory leaks in test_channel? (or is it because of fork())
-
-PR to support %e and %k in 'errorformat'. #9624
-
 With a window height of 6 and 'scrolloff' set to 3, using "j" does not scroll
-evenly. (#10545)
+evenly. (#10545)  Need to handle this in scroll_cursor_bot().
 
 Idea: when typing ":e /some/dir/" and "dir" does not exist, highlight in red.
 
-":set &shellpipe" and ":set &shellredir" should use the logic from
+":set shellpipe&" and ":set shellredir&" should use the logic from
 initialization to figure out the default value from 'shell'.  Add a test for
 this.
 
@@ -266,8 +254,6 @@ The line number can be obtained from win->w_lines[].
 
 MS-Windows: did path modifier :p:8 stop working?  #8600
 
-Add support for "underdouble", "underdot" and "underdash". #9553
-
 test_arglist func Test_all_not_allowed_from_cmdwin() hangs on MS-Windows.
 
 Information for a specific terminal (e.g. gnome, tmux, konsole, alacritty) is
@@ -277,9 +263,6 @@ more information.
 Problem that a previous silent ":throw" causes a following try/catch not to
 work. (ZyX, 2013 Sep 28) With examples: (Malcolm Rowe, 2015 Dec 24)
 Also see #8487 for an example.
-
-Patch to implement the vimtutor with a plugin: #6414
-Was originally written by Felipe Morales.
 
 Request to use "." for the cursor column in search pattern \%<.c and \%<.v.
 (#8179)
@@ -312,14 +295,10 @@ inconsistent with the documentation.
 
 globpath() does not use 'wildignorecase' at all? (related to #8350)
 
-Add a "--gui-dialog-file" argument, to be used in tests to avoid getting stuck.
-
 Add 'termguiattr' option, use "gui=" attributes in the terminal?  Would work
 with 'termguicolors'. #1740
 
 Patch for blockwise paste reporting changes: #6660.  Asked for a PR.
-
-Patch to make fillchars global-local. (#5206)
 
 Missing filetype test for bashrc, PKGBUILD, etc.
 
@@ -327,6 +306,11 @@ Add an option to not fetch terminal codes in xterm, to avoid flicker when t_Co
 changes.
 
 Add ??= operator, "a ??= b" works like "a = a ?? b". #10343
+
+When ":redir" is used while already active, the previous one is ended.  But
+when redirecting to a local variable (function or script) storing the value
+won't work.  At least give an error.  Is there a way to make it work?
+#10616
 
 Add an option to start_timer() to return from the input loop with K_IGNORE.
 This is useful e.g. when a popup was created that disables mappings, we need
@@ -340,6 +324,10 @@ Try setting a color then request the current color, like using t_u7.
 
 Make the jumplist behave like a tag stack. (#7738)  Should there be a more
 time bound navigation, like with undo?
+
+For testing, make a copy of ml_line_ptr instead of pointing it into the data
+block, so that valgrind can do out of bounds check.  Set ML_LINE_DIRTY flag or
+add ML_LINE_ALLOCED.
 
 Changing a capturing group to non-capturing changes the result: #7607
     :echo matchstr('aaa bbb', '\(.\{-1,}\>\)\|.*')
@@ -398,6 +386,10 @@ Lua: updating wrong buffer when using newly created, unloaded buffer.
 (#6539)
 
 File marks merging has duplicates since 7.4.1925. (Ingo Karkat, #5733)
+
+A syntax plugin cannot use autocommands, it could be sourced from setting
+'syntax' in a modeline.  Add a function that indicates whether "secure"
+and/or "sandbox" are set.
 
 Problem with auto-formatting - inserting space and putting cursor before added
 character. (#6154)
@@ -610,39 +602,6 @@ Should we include some part of pull request #4505, not increment changedtick
 in some cases?  E.g. for ":write" when the changed flag was already off, the
 buffer didn't change at all.
 
-Session file contains absolute paths when "curdir" is removed form
-'sessionoptions', making it impossible to have a session with a relative path.
-(#4450)
-
-Session file only contains local option values for buffers that are in a
-window, not other buffers. (#7532)
-
-Script generated by :mksession does not work well if there are windows with
-modified buffers
-  change "silent only" into "silent only!"
-  change "edit fname" of first buffer to "hide edit fname"
-  skip "badd fname" if "fname" is already in the buffer list
-  remove remark about unloading buffers from documentation
-
-When session file has name in argument list but the buffer was deleted, the
-buffer is not deleted when using the session file. (#1393)
-Should add the buffer in hidden state.
-
-When a session file is created and there are "nofile" buffers, these are not
-filled.  Need to trigger BufReadCmd autocommands.  Also handle deleting the
-initial empty buffer better. (ZyX, 2015 March 8)
-
-Setting the spell file in a session only reads the local additions, not the
-normal spell file. (Enno Nagel, 2014 Mar 29)
-
-Directory wrong in session file, caused by ":lcd" in BufEnter autocommand.
-(Felix Kater, 2009 Mar 3)
-
-Something wrong with session that has "cd" commands and "badd", in such a way
-that Vim doesn't find the edited file in the buffer list, causing the
-ATTENTION message?  (Tony Mechelynck, 2008 Dec 1)
-Also: swap files are in ~/tmp/  One has relative file name ".mozilla/...".
-
 When using a timer callback vgetc_busy is reset, allowing for using input().
 But in a channel callback this does not happen.  We need to do something
 similar to check_due_timer().  Also see #3809.
@@ -670,12 +629,9 @@ Also see #2352, want better control over balloon, perhaps set the position.
 Should also be possible to add highlighting, like in the status line?
 balloonexpr() on MS-Windows GUI doesn't handle accented chars? (nivaemail,
 2018 Sep 14)
-Another request: #3811.
 
 More warnings from static analysis:
 https://lgtm.com/projects/g/vim/vim/alerts/?mode=list
-
-Still a E315 error when using terminal. (Masato Nishihata, #3959)
 
 Not existing directory in CDPATH leads to two shell calls. (#4525)
 
@@ -684,15 +640,9 @@ internals of the dict structure.
 
 nvo-mode mapping works on Windows, not on Linux. (#3678)
 
-Missing tests for:
-- add_termcap_entry()
-
 Redo only remembers the last change.  Could use "{count}g." to redo an older
 change.  How does the user know which change?  At least have a way to list
 them: ":repeats".  Add to history, like search history and command line history.
-
-Pasting foo} causes Vim to behave weird. (John Little, 2018 Jun 17)
-Related to bracketed paste.  I cannot reproduce it.
 
 When 'confirm' is set a "silent q" doesn't show the prompt.  It should in this
 case. (Nate Peterson, 2019 Jan 31, #3892)
@@ -716,10 +666,6 @@ When 'sidescrolloff' is set, using "zl" to go to the end of the line, suddenly
 scrolls back.  Should allow for this scrolling, like 'scrolloff' does when
 using CTRL-E. (Yee Cheng Chin, #3721)
 
-Invalid memory access with old regexp engine. (Dominique Pelle, 2018 Sep 3,
-#3405)  Introduced by 8.0.1517, which was fixing another memory access error.
-(Sep 8)
-
 Add function to make use of internal diff, working on two lists and returning
 unified diff (list of lines).
 
@@ -738,18 +684,12 @@ highlight name.  Esp. for the statusline.
 And "extends" and "precedes" are also useful without 'list' set.  Also in
 'fillchars' or another option?
 
-Sourceforge Vim pages still have content, redirect from empty page.
+Sourceforge Vim pages still have content, make them empty, keep redirect.
 Check for PHP errors. (Wayne Davison, 2018 Oct 26)
 
 Problem with Visual yank when 'linebreak' and 'showbreak' are set.
 Patch with tests, but it's not clear how it is supposed to work. (tommm, 2018
 Nov 17)  Asked about this, Dec 22. Christian will have a look.
-
-home_replace() uses $HOME instead of "homedir". (Cesar Martins, 2018 Aug 9)
-
-When the status line uses term_gettitle(), it does not get updated when the
-terminal title changes. (Josh Triplett, 2018 Sep 9, #3418)
-How would we know that the status line needs to be updated?
 
 Update for xim-input-style help (Tony Mechelynck, 2019 Jan 10).
 Feedback from someone who uses this?
@@ -767,9 +707,6 @@ Further xdiff changes:
 
 Difference between two regexp engines: #3373
 
-Patch to add ch_listen() (Yasuhiro Matsumoto, 2018 Nov 26, #3639)
-What is the practical use for this?  Need an example.
-
 When the last line wraps, selecting with the mouse below that line only
 includes the first screen line. (2018 Aug 23, #3368)
 
@@ -781,11 +718,9 @@ Merge checking for 'cursorline' and 'concealcursor', see neovim #9492.
 Add a windowID argument to placing a sign, so that it only shows up in one
 window for the buffer.
 
-Win32 key codes are messy.  Mike Williams tried to fix that, but now old
-mappings no longer work.  Create a new terminal for the better solution?
-
 Compiler warning (geeknik, 2017 Oct 26):
-- undefined left shift in get_string_tv() (#2250)
+- undefined left shift in eval_string(), before hex2nr() (#2250)
+  Use unsigned for "nr".
 
 Add Native language protocol server (LSP) support. (Yegappan Lakshmanan, 2018
 Oct 28)
@@ -797,27 +732,14 @@ Nov 22).
 
 Patch to list user digraphs. (Christian Brabandt, 2012 Apr 14)
 
-Patch to add digraph() function. (Christian Brabandt, 2013 Aug 22, update Aug
-24)
-
-Try out background make plugin:
-  https://github.com/AndrewVos/vim-make-background
-or asyncmake:
-  https://github.com/yegappan/asyncmake
-
-Cursor in wrong position when line wraps. (#2540)
-
 Setting 'columns' in a BufEnter autocommand causes a second tab width to
 behave strangely, as if there is a gap and a vertical window separator.
 (Michael Soyka, 2018 Sep 23, #3477)
 
-Make {skip} argument of searchpair() consistent with other places where we
-pass an expression to evaluate.  Allow passing zero for "never skip".
-
 Add an option similar to 'lazyredraw' to skip redrawing while executing a
 script or function.
 
-When using a menu item while the "more" prompt is displayed doesn't work well.
+Using a menu item while the "more" prompt is displayed doesn't work well.
 E.g. after using help->version.  Have a key that ends the "more" prompt and
 does nothing otherwise?
 
@@ -831,25 +753,8 @@ MS-Windows.  Perhaps in \#  the \ is seen as a path separator. (Axel Bender,
 2017 Feb 9)  Can we expand wildcards first and send the path literally to the
 receiving Vim?  Or make an exception for #, it's not useful remotely.
 
-Should add a test for every command line argument.  Check coverage for what is
-missing: --nofork, -A , -b, -h, etc.
-
-":au * * command" should not be allowed, only use * for event when listing or
-deleting autocmds, not when adding them.
-
 Column number is wrong when using 'linebreak' and 'wrap'. (Keith Smiley, 2018
 Jan 15, #2555)
-
-":bufdo e" disabled syntax HL in windows other than the current. (BPJ)
-
-Check argument of systemlist(). (Pavlov)
-
-No maintainer for Vietnamese translations.
-No maintainer for Simplified Chinese translations.
-
-Python indenting: alternative way to indent arguments:
-http://orchistro.tistory.com/236
-Should be supported with a flag.
 
 Add Makefiles to the runtime/spell directory tree, since nobody uses Aap.
 Will have to explain the manual steps (downloading the .aff and .dic files,
@@ -859,9 +764,6 @@ User dictionary ~/.vim/spell/lang.utf-8.add not used for spell checking until a
 word is re-added to it. (Matej Cepl, 2018 Feb 6)
 
 Fold at end of the buffer behaves inconsistently. (James McCoy, 2017 Oct 9)
-
-Using 'wildignore' also applies to literally entered file name.  Also with
-:drop (remote commands).
 
 Implement option_save() and option_restore():
 option_restore({list})					*option_restore()*
@@ -1696,9 +1598,6 @@ Should be possible to enable/disable matchparen per window or buffer.
 Add a check for b:no_match_paren in Highlight_matching_Pair() (Marcin
 Szamotulski, 2012 Nov 8)
 
-Session file creation: 'autochdir' causes trouble.  Keep it off until after
-loading all files.
-
 'iminsert' global value set when using ":setlocal iminsert"? (Wu, 2012 Jun 23)
 
 Patch to append regexp to tag commands to make it possible to select one out
@@ -2112,9 +2011,6 @@ does not work. (Nieko Maatjes, 2009 Jan 8, Ingo Karkat, 2009 Jan 22)
 opening/closing window causes other window with 'winfixheight' to change
 height.  Also happens when there is another window in the frame, if it's not
 very high. (Yegappan Lakshmanan, 2010 Jul 22, Michael Peeters, 2010 Jul 22)
-
-Session file generates error upon loading, cause by --remote-silent-tab.
-(7tommm (ytommm) 2010 Nov 24)
 
 Using ~ works OK on 'a' with composing char, but not on 0x0418  with composing
 char 0x0301. (Tony Mechelynck, 2009 Mar 4)
@@ -5518,6 +5414,35 @@ Modelines:
 
 
 Sessions:
+-   Session file contains absolute paths when "curdir" is removed form
+    'sessionoptions', making it impossible to have a session with a relative
+    path.  (#4450)
+-   Session file only contains local option values for buffers that are in a
+    window, not other buffers. (#7532)
+-   Script generated by :mksession does not work well if there are windows
+    with modified buffers:
+      change "silent only" into "silent only!"
+      change "edit fname" of first buffer to "hide edit fname"
+      skip "badd fname" if "fname" is already in the buffer list
+      remove remark about unloading buffers from documentation
+-   When session file has name in argument list but the buffer was deleted,
+    the buffer is not deleted when using the session file. (#1393) Should add
+    the buffer in hidden state.
+-   When a session file is created and there are "nofile" buffers, these are
+    not filled.  Need to trigger BufReadCmd autocommands.  Also handle
+    deleting the initial empty buffer better. (ZyX, 2015 March 8)
+-   Setting the spell file in a session only reads the local additions, not
+    the normal spell file. (Enno Nagel, 2014 Mar 29)
+-   Directory wrong in session file, caused by ":lcd" in BufEnter autocommand.
+    (Felix Kater, 2009 Mar 3)
+-   Something wrong with session that has "cd" commands and "badd", in such a
+    way that Vim doesn't find the edited file in the buffer list, causing the
+    ATTENTION message?  (Tony Mechelynck, 2008 Dec 1) Also: swap files are in
+    ~/tmp/  One has relative file name ".mozilla/...".
+-   Session file creation: 'autochdir' causes trouble.  Keep it off until
+    after loading all files.
+-   Session file generates error upon loading, cause by --remote-silent-tab.
+    (7tommm (ytommm) 2010 Nov 24)
 8   DOS/Windows: ":mksession" generates a "cd" command where "aa\#bb" means
     directory "#bb" in "aa", but it's used as "aa#bb". (Ronald Hoellwarth)
 7   When there is a "help.txt" window in a session file, restoring that
@@ -5529,7 +5454,6 @@ Sessions:
     default value.
 7   With ":mksession" also store the tag stack and jump history. (Michal
     Malecki)
-7   Persistent variables: "p:var"; stored in viminfo file and sessions files.
 
 
 Options:

@@ -234,6 +234,7 @@ let s:filename_checks = {
     \ 'haml': ['file.haml'],
     \ 'hamster': ['file.hsm'],
     \ 'handlebars': ['file.hbs'],
+    \ 'hare': ['file.ha'],
     \ 'haskell': ['file.hs', 'file.hsc', 'file.hs-boot', 'file.hsig'],
     \ 'haste': ['file.ht'],
     \ 'hastepreproc': ['file.htpp'],
@@ -312,7 +313,6 @@ let s:filename_checks = {
     \ 'lotos': ['file.lot', 'file.lotos'],
     \ 'lout': ['file.lou', 'file.lout'],
     \ 'lpc': ['file.lpc', 'file.ulpc'],
-    \ 'lprolog': ['file.sig'],
     \ 'lsl': ['file.lsl'],
     \ 'lss': ['file.lss'],
     \ 'lua': ['file.lua', 'file.rockspec', 'file.nse'],
@@ -718,6 +718,7 @@ let s:script_checks = {
       \ 'routeros': [['#!/path/rsc']],
       \ 'fish': [['#!/path/fish']],
       \ 'forth': [['#!/path/gforth']],
+      \ 'icon': [['#!/path/icon']],
       \ }
 
 " Various forms of "env" optional arguments.
@@ -835,7 +836,7 @@ func Test_bas_file()
 
   " Visual Basic
 
-  call writefile(['Attribute VB_NAME = "Testing"'], 'Xfile.bas')
+  call writefile(['Attribute VB_NAME = "Testing"', 'Enum Foo', 'End Enum'], 'Xfile.bas')
   split Xfile.bas
   call assert_equal('vb', &filetype)
   bwipe!
@@ -1714,6 +1715,101 @@ func Test_xpm_file()
   bwipe!
 
   call delete('file.xpm')
+  filetype off
+endfunc
+
+func Test_cls_file()
+  filetype on
+
+  call writefile(['looks like Smalltalk'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('st', &filetype)
+  bwipe!
+
+  " Test dist#ft#FTcls()
+
+  let g:filetype_cls = 'vb'
+  split Xfile.cls
+  call assert_equal('vb', &filetype)
+  bwipe!
+  unlet g:filetype_cls
+
+  " TeX
+
+  call writefile(['%'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('tex', &filetype)
+  bwipe!
+
+  " Rexx
+
+  call writefile(['# rexx'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('rexx', &filetype)
+  bwipe!
+
+  " Visual Basic
+
+  call writefile(['VERSION 1.0 CLASS'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('vb', &filetype)
+  bwipe!
+
+  call delete('Xfile.cls')
+  filetype off
+endfunc
+
+func Test_sig_file()
+  filetype on
+
+  call writefile(['this is neither Lambda Prolog nor SML'], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('', &filetype)
+  bwipe!
+
+  " Test dist#ft#FTsig()
+
+  let g:filetype_sig = 'sml'
+  split Xfile.sig
+  call assert_equal('sml', &filetype)
+  bwipe!
+  unlet g:filetype_sig
+
+  " Lambda Prolog
+
+  call writefile(['sig foo.'], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('lprolog', &filetype)
+  bwipe!
+
+  call writefile(['/* ... */'], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('lprolog', &filetype)
+  bwipe!
+
+  call writefile(['% ...'], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('lprolog', &filetype)
+  bwipe!
+
+  " SML signature file
+
+  call writefile(['signature FOO ='], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('sml', &filetype)
+  bwipe!
+
+  call writefile(['structure FOO ='], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('sml', &filetype)
+  bwipe!
+
+  call writefile(['(* ... *)'], 'Xfile.sig')
+  split Xfile.sig
+  call assert_equal('sml', &filetype)
+  bwipe!
+
+  call delete('Xfile.sig')
   filetype off
 endfunc
 

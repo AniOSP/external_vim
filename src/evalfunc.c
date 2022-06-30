@@ -75,7 +75,6 @@ static void f_getregtype(typval_T *argvars, typval_T *rettv);
 static void f_gettagstack(typval_T *argvars, typval_T *rettv);
 static void f_gettext(typval_T *argvars, typval_T *rettv);
 static void f_haslocaldir(typval_T *argvars, typval_T *rettv);
-static void f_hasmapto(typval_T *argvars, typval_T *rettv);
 static void f_hlID(typval_T *argvars, typval_T *rettv);
 static void f_hlexists(typval_T *argvars, typval_T *rettv);
 static void f_hostname(typval_T *argvars, typval_T *rettv);
@@ -3732,7 +3731,7 @@ f_environ(typval_T *argvars UNUSED, typval_T *rettv)
     extern char		**environ;
 # endif
 
-    if (rettv_dict_alloc(rettv) != OK)
+    if (rettv_dict_alloc(rettv) == FAIL)
 	return;
 
 # ifdef MSWIN
@@ -4159,7 +4158,7 @@ f_expand(typval_T *argvars, typval_T *rettv)
 	    emsg(errormsg);
 	if (rettv->v_type == VAR_LIST)
 	{
-	    if (rettv_list_alloc(rettv) != FAIL && result != NULL)
+	    if (rettv_list_alloc(rettv) == OK && result != NULL)
 		list_append_string(rettv->vval.v_list, result, -1);
 	    vim_free(result);
 	}
@@ -4182,7 +4181,7 @@ f_expand(typval_T *argvars, typval_T *rettv)
 	    if (rettv->v_type == VAR_STRING)
 		rettv->vval.v_string = ExpandOne(&xpc, s, NULL,
 							   options, WILD_ALL);
-	    else if (rettv_list_alloc(rettv) != FAIL)
+	    else if (rettv_list_alloc(rettv) == OK)
 	    {
 		int i;
 
@@ -4719,19 +4718,23 @@ f_get(typval_T *argvars, typval_T *rettv)
 	if (pt != NULL)
 	{
 	    char_u *what = tv_get_string(&argvars[1]);
-	    char_u *n;
 
 	    if (STRCMP(what, "func") == 0 || STRCMP(what, "name") == 0)
 	    {
+		char_u *name = partial_name(pt);
+
 		rettv->v_type = (*what == 'f' ? VAR_FUNC : VAR_STRING);
-		n = partial_name(pt);
-		if (n == NULL)
+		if (name == NULL)
 		    rettv->vval.v_string = NULL;
 		else
 		{
-		    rettv->vval.v_string = vim_strsave(n);
 		    if (rettv->v_type == VAR_FUNC)
-			func_ref(rettv->vval.v_string);
+			func_ref(name);
+		    if (*what == 'n' && pt->pt_name == NULL
+							&& pt->pt_func != NULL)
+			// use <SNR> instead of the byte code
+			name = printable_func_name(pt->pt_func);
+		    rettv->vval.v_string = vim_strsave(name);
 		}
 	    }
 	    else if (STRCMP(what, "dict") == 0)
@@ -4784,7 +4787,7 @@ f_getchangelist(typval_T *argvars, typval_T *rettv)
     dict_T	*d;
     int		changelistindex;
 
-    if (rettv_list_alloc(rettv) != OK)
+    if (rettv_list_alloc(rettv) == FAIL)
 	return;
 
     if (in_vim9script() && check_for_opt_buffer_arg(argvars, 0) == FAIL)
@@ -4929,7 +4932,7 @@ f_getcharpos(typval_T *argvars UNUSED, typval_T *rettv)
     static void
 f_getcharsearch(typval_T *argvars UNUSED, typval_T *rettv)
 {
-    if (rettv_dict_alloc(rettv) != FAIL)
+    if (rettv_dict_alloc(rettv) == OK)
     {
 	dict_T *dict = rettv->vval.v_dict;
 
@@ -5016,7 +5019,7 @@ f_getjumplist(typval_T *argvars, typval_T *rettv)
     list_T	*l;
     dict_T	*d;
 
-    if (rettv_list_alloc(rettv) != OK)
+    if (rettv_list_alloc(rettv) == FAIL)
 	return;
 
     if (in_vim9script()
@@ -5221,7 +5224,7 @@ f_gettagstack(typval_T *argvars, typval_T *rettv)
 {
     win_T	*wp = curwin;			// default is current window
 
-    if (rettv_dict_alloc(rettv) != OK)
+    if (rettv_dict_alloc(rettv) == FAIL)
 	return;
 
     if (in_vim9script() && check_for_opt_number_arg(argvars, 0) == FAIL)
@@ -6650,40 +6653,6 @@ f_haslocaldir(typval_T *argvars, typval_T *rettv)
 }
 
 /*
- * "hasmapto()" function
- */
-    static void
-f_hasmapto(typval_T *argvars, typval_T *rettv)
-{
-    char_u	*name;
-    char_u	*mode;
-    char_u	buf[NUMBUFLEN];
-    int		abbr = FALSE;
-
-    if (in_vim9script()
-	    && (check_for_string_arg(argvars, 0) == FAIL
-		|| check_for_opt_string_arg(argvars, 1) == FAIL
-		|| (argvars[1].v_type != VAR_UNKNOWN
-		    && check_for_opt_bool_arg(argvars, 2) == FAIL)))
-	return;
-
-    name = tv_get_string(&argvars[0]);
-    if (argvars[1].v_type == VAR_UNKNOWN)
-	mode = (char_u *)"nvo";
-    else
-    {
-	mode = tv_get_string_buf(&argvars[1], buf);
-	if (argvars[2].v_type != VAR_UNKNOWN)
-	    abbr = (int)tv_get_bool(&argvars[2]);
-    }
-
-    if (map_to_exists(name, mode, abbr))
-	rettv->vval.v_number = TRUE;
-    else
-	rettv->vval.v_number = FALSE;
-}
-
-/*
  * "highlightID(name)" function
  */
     static void
@@ -7844,7 +7813,7 @@ f_printf(typval_T *argvars, typval_T *rettv)
     static void
 f_pum_getpos(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 {
-    if (rettv_dict_alloc(rettv) != OK)
+    if (rettv_dict_alloc(rettv) == FAIL)
 	return;
     pum_set_event_info(rettv->vval.v_dict);
 }
@@ -8133,7 +8102,7 @@ f_range(typval_T *argvars, typval_T *rettv)
     varnumber_T	stride = 1;
     int		error = FALSE;
 
-    if (rettv_list_alloc(rettv) != OK)
+    if (rettv_list_alloc(rettv) == FAIL)
 	return;
 
     if (in_vim9script()
@@ -8543,6 +8512,9 @@ search_cmn(typval_T *argvars, pos_T *match_pos, int *flagsp)
 	    if (!do_skip)
 		break;
 	}
+
+	// clear the start flag to avoid getting stuck here
+	options &= ~SEARCH_START;
     }
 
     if (subpatnum != FAIL)
@@ -8975,6 +8947,10 @@ do_searchpair(
     if (skip != NULL)
 	use_skip = eval_expr_valid_arg(skip);
 
+#ifdef FEAT_RELTIME
+    if (time_limit > 0)
+	init_regexp_timeout(time_limit);
+#endif
     save_cursor = curwin->w_cursor;
     pos = curwin->w_cursor;
     CLEAR_POS(&firstpos);
@@ -8986,9 +8962,6 @@ do_searchpair(
 
 	CLEAR_FIELD(sia);
 	sia.sa_stop_lnum = lnum_stop;
-#ifdef FEAT_RELTIME
-	sia.sa_tm = time_limit;
-#endif
 	n = searchit(curwin, curbuf, &pos, NULL, dir, pat, 1L,
 						     options, RE_SEARCH, &sia);
 	if (n == FAIL || (firstpos.lnum != 0 && EQUAL_POS(pos, firstpos)))
@@ -9074,6 +9047,9 @@ do_searchpair(
 	curwin->w_cursor = save_cursor;
 
 theend:
+#ifdef FEAT_RELTIME
+    disable_regexp_timeout();
+#endif
     vim_free(pat2);
     vim_free(pat3);
     if (p_cpo == empty_option)
@@ -10128,14 +10104,27 @@ f_synIDattr(typval_T *argvars UNUSED, typval_T *rettv)
 		break;
 
 	case 'u':
-		if (TOLOWER_ASC(what[1]) == 'l')	// ul
-		    p = highlight_color(id, what, modec);
-		else if (STRLEN(what) <= 5 || TOLOWER_ASC(what[5]) != 'c')
+		if (STRLEN(what) >= 9)
+		{
+		    if (TOLOWER_ASC(what[5]) == 'l')
 							// underline
-		    p = highlight_has_attr(id, HL_UNDERLINE, modec);
-		else
+			p = highlight_has_attr(id, HL_UNDERLINE, modec);
+		    else if (TOLOWER_ASC(what[5]) != 'd')
 							// undercurl
-		    p = highlight_has_attr(id, HL_UNDERCURL, modec);
+			p = highlight_has_attr(id, HL_UNDERCURL, modec);
+		    else if (TOLOWER_ASC(what[6]) != 'o')
+							// underdashed
+			p = highlight_has_attr(id, HL_UNDERDASHED, modec);
+		    else if (TOLOWER_ASC(what[7]) == 'u')
+							// underdouble
+			p = highlight_has_attr(id, HL_UNDERDOUBLE, modec);
+		    else
+							// underdotted
+			p = highlight_has_attr(id, HL_UNDERDOTTED, modec);
+		}
+		else
+							// ul
+		    p = highlight_color(id, what, modec);
 		break;
     }
 
@@ -10197,7 +10186,7 @@ f_synconcealed(typval_T *argvars UNUSED, typval_T *rettv)
 
     CLEAR_FIELD(str);
 
-    if (rettv_list_alloc(rettv) != FAIL)
+    if (rettv_list_alloc(rettv) == OK)
     {
 	if (lnum >= 1 && lnum <= curbuf->b_ml.ml_line_count
 	    && col >= 0 && col <= (long)STRLEN(ml_get(lnum))
@@ -10258,7 +10247,7 @@ f_synstack(typval_T *argvars UNUSED, typval_T *rettv)
 
     if (lnum >= 1 && lnum <= curbuf->b_ml.ml_line_count
 	    && col >= 0 && col <= (long)STRLEN(ml_get(lnum))
-	    && rettv_list_alloc(rettv) != FAIL)
+	    && rettv_list_alloc(rettv) == OK)
     {
 	(void)syn_get_id(curwin, lnum, col, FALSE, NULL, TRUE);
 	for (i = 0; ; ++i)
@@ -10293,7 +10282,7 @@ f_tabpagebuflist(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 	if (tp != NULL)
 	    wp = (tp == curtab) ? firstwin : tp->tp_firstwin;
     }
-    if (wp != NULL && rettv_list_alloc(rettv) != FAIL)
+    if (wp != NULL && rettv_list_alloc(rettv) == OK)
     {
 	for (; wp != NULL; wp = wp->w_next)
 	    if (list_append_number(rettv->vval.v_list,
