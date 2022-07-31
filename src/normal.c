@@ -1798,6 +1798,9 @@ display_showcmd(void)
 {
     int	    len;
 
+    if (p_ch == 0)
+	return;
+
     cursor_off();
 
     len = (int)STRLEN(showcmd_buf);
@@ -7147,6 +7150,11 @@ nv_record(cmdarg_T *cap)
 #ifdef FEAT_CMDWIN
 	if (cap->nchar == ':' || cap->nchar == '/' || cap->nchar == '?')
 	{
+	    if (cmdwin_type != 0)
+	    {
+		emsg(_(e_cmdline_window_already_open));
+		return;
+	    }
 	    stuffcharReadbuff(cap->nchar);
 	    stuffcharReadbuff(K_CMDWIN);
 	}
