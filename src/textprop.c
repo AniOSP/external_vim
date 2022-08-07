@@ -12,7 +12,6 @@
  *
  * TODO:
  * - Adjust text property column and length when text is inserted/deleted.
- *   -> a :substitute with a multi-line match
  *   -> search for changed_bytes() from misc1.c
  *   -> search for mark_col_adjust()
  * - Perhaps we only need TP_FLAG_CONT_NEXT and can drop TP_FLAG_CONT_PREV?
@@ -238,9 +237,10 @@ prop_add_one(
 	    goto theend;
 	((char_u **)gap->ga_data)[gap->ga_len++] = text;
 
-	// change any Tab to a Space to make it simpler to compute the size
+	// change any control character (Tab, Newline, etc.) to a Space to make
+	// it simpler to compute the size
 	for (p = text; *p != NUL; MB_PTR_ADV(p))
-	    if (*p == TAB)
+	    if (*p < ' ')
 		*p = ' ';
 	text = NULL;
     }
@@ -594,10 +594,35 @@ get_text_props(buf_T *buf, linenr_T lnum, char_u **props, int will_change)
     return (int)(proplen / sizeof(textprop_T));
 }
 
+/*
+ * Return the number of text properties with "below" alignment in line "lnum".
+ */
+    int
+prop_count_below(buf_T *buf, linenr_T lnum)
+{
+    char_u	*props;
+    int		count = get_text_props(buf, lnum, &props, FALSE);
+    int		result = 0;
+    textprop_T	prop;
+    int		i;
+
+    if (count == 0)
+	return 0;
+    for (i = 0; i < count; ++i)
+    {
+	mch_memmove(&prop, props + i * sizeof(prop), sizeof(prop));
+	if (prop.tp_col == MAXCOL && (prop.tp_flags & TP_FLAG_ALIGN_BELOW))
+	    ++result;
+    }
+    return result;
+}
+
 /**
  * Return the number of text properties on line "lnum" in the current buffer.
  * When "only_starting" is true only text properties starting in this line will
  * be considered.
+ * When "last_line" is FALSE then text properties after the line are not
+ * counted.
  */
     int
 count_props(linenr_T lnum, int only_starting, int last_line)
@@ -611,7 +636,7 @@ count_props(linenr_T lnum, int only_starting, int last_line)
     for (i = 0; i < proplen; ++i)
     {
 	mch_memmove(&prop, props + i * sizeof(prop), sizeof(prop));
-	// A prop is droppend when in the first line and it continues from the
+	// A prop is dropped when in the first line and it continues from the
 	// previous line, or when not in the last line and it is virtual text
 	// after the line.
 	if ((only_starting && (prop.tp_flags & TP_FLAG_CONT_PREV))
@@ -679,6 +704,29 @@ set_text_props(linenr_T lnum, char_u *props, int len)
 	vim_free(curbuf->b_ml.ml_line_ptr);
     curbuf->b_ml.ml_line_ptr = newtext;
     curbuf->b_ml.ml_line_len = textlen + len;
+    curbuf->b_ml.ml_flags |= ML_LINE_DIRTY;
+}
+
+/*
+ * Add "text_props" with "text_prop_count" text properties to line "lnum".
+ */
+    void
+add_text_props(linenr_T lnum, textprop_T *text_props, int text_prop_count)
+{
+    char_u  *text;
+    char_u  *newtext;
+    int	    proplen = text_prop_count * (int)sizeof(textprop_T);
+
+    text = ml_get(lnum);
+    newtext = alloc(curbuf->b_ml.ml_line_len + proplen);
+    if (newtext == NULL)
+	return;
+    mch_memmove(newtext, text, curbuf->b_ml.ml_line_len);
+    mch_memmove(newtext + curbuf->b_ml.ml_line_len, text_props, proplen);
+    if (curbuf->b_ml.ml_flags & (ML_LINE_DIRTY | ML_ALLOCATED))
+	vim_free(curbuf->b_ml.ml_line_ptr);
+    curbuf->b_ml.ml_line_ptr = newtext;
+    curbuf->b_ml.ml_line_len += proplen;
     curbuf->b_ml.ml_flags |= ML_LINE_DIRTY;
 }
 
@@ -1542,6 +1590,15 @@ prop_type_set(typval_T *argvars, int add)
 		prop->pt_flags &= ~PT_FLAG_COMBINE;
 	}
 
+	di = dict_find(dict, (char_u *)"override", -1);
+	if (di != NULL)
+	{
+	    if (tv_get_bool(&di->di_tv))
+		prop->pt_flags |= PT_FLAG_OVERRIDE;
+	    else
+		prop->pt_flags &= ~PT_FLAG_OVERRIDE;
+	}
+
 	di = dict_find(dict, (char_u *)"priority", -1);
 	if (di != NULL)
 	    prop->pt_priority = tv_get_number(&di->di_tv);
@@ -1976,8 +2033,9 @@ adjust_props_for_split(
 	pt = text_prop_type_by_id(curbuf, prop.tp_type);
 	start_incl = (pt != NULL && (pt->pt_flags & PT_FLAG_INS_START_INCL));
 	end_incl = (pt != NULL && (pt->pt_flags & PT_FLAG_INS_END_INCL));
-	cont_prev = prop.tp_col + !start_incl <= kept;
-	cont_next = skipped <= prop.tp_col + prop.tp_len - !end_incl;
+	cont_prev = prop.tp_col != MAXCOL && prop.tp_col + !start_incl <= kept;
+	cont_next = prop.tp_col != MAXCOL
+			   && skipped <= prop.tp_col + prop.tp_len - !end_incl;
 
 	if (cont_prev && ga_grow(&prevprop, 1) == OK)
 	{
@@ -1993,17 +2051,22 @@ adjust_props_for_split(
 
 	// Only add the property to the next line if the length is bigger than
 	// zero.
-	if (cont_next && ga_grow(&nextprop, 1) == OK)
+	if ((cont_next || prop.tp_col == MAXCOL)
+						&& ga_grow(&nextprop, 1) == OK)
 	{
 	    textprop_T *p = ((textprop_T *)nextprop.ga_data) + nextprop.ga_len;
+
 	    *p = prop;
 	    ++nextprop.ga_len;
-	    if (p->tp_col > skipped)
-		p->tp_col -= skipped - 1;
-	    else
+	    if (p->tp_col != MAXCOL)
 	    {
-		p->tp_len -= skipped - p->tp_col;
-		p->tp_col = 1;
+		if (p->tp_col > skipped)
+		    p->tp_col -= skipped - 1;
+		else
+		{
+		    p->tp_len -= skipped - p->tp_col;
+		    p->tp_col = 1;
+		}
 	    }
 	    if (cont_prev)
 		p->tp_flags |= TP_FLAG_CONT_PREV;

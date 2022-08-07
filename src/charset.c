@@ -225,7 +225,8 @@ buf_init_chartab(
 			    }
 			    else
 			    {
-				g_chartab[c] = (g_chartab[c] & ~CT_CELL_MASK) + 1;
+				g_chartab[c] = (g_chartab[c] & ~CT_CELL_MASK)
+									   + 1;
 				g_chartab[c] |= CT_PRINT_CHAR;
 			    }
 			}
@@ -654,6 +655,9 @@ char2cells(int c)
     int
 ptr2cells(char_u *p)
 {
+    if (!has_mbyte)
+	return byte2cells(*p);
+
     // For UTF-8 we need to look at more bytes if the first byte is >= 0x80.
     if (enc_utf8 && *p >= 0x80)
 	return utf_ptr2cells(p);
@@ -681,16 +685,13 @@ vim_strnsize(char_u *s, int len)
     int		size = 0;
 
     while (*s != NUL && --len >= 0)
-	if (has_mbyte)
-	{
-	    int	    l = (*mb_ptr2len)(s);
+    {
+	int	    l = (*mb_ptr2len)(s);
 
-	    size += ptr2cells(s);
-	    s += l;
-	    len -= l - 1;
-	}
-	else
-	    size += byte2cells(*s++);
+	size += ptr2cells(s);
+	s += l;
+	len -= l - 1;
+    }
 
     return size;
 }
@@ -846,13 +847,25 @@ vim_iswordp_buf(char_u *p, buf_T *buf)
 }
 
 /*
- * return TRUE if 'c' is a valid file-name character
+ * Return TRUE if 'c' is a valid file-name character as specified with the
+ * 'isfname' option.
  * Assume characters above 0x100 are valid (multi-byte).
+ * To be used for commands like "gf".
  */
     int
 vim_isfilec(int c)
 {
     return (c >= 0x100 || (c > 0 && (g_chartab[c] & CT_FNAME_CHAR)));
+}
+
+/*
+ * Return TRUE if 'c' is a valid file-name character, including characters left
+ * out of 'isfname' to make "gf" work, such as comma, space, '@', etc.
+ */
+    int
+vim_is_fname_char(int c)
+{
+    return vim_isfilec(c) || c == ',' || c == ' ' || c == '@';
 }
 
 /*
@@ -1013,6 +1026,40 @@ lbr_chartabsize_adv(chartabsize_T *cts)
     return retval;
 }
 
+#if defined(FEAT_PROP_POPUP) || defined(PROTO)
+/*
+ * Return the cell size of virtual text after truncation.
+ */
+    int
+textprop_size_after_trunc(
+	win_T	*wp,
+	int	below,
+	int	added,
+	char_u	*text,
+	int	*n_used_ptr)
+{
+    int	space = below ? wp->w_width : added;
+    int len = (int)STRLEN(text);
+    int strsize = 0;
+    int n_used;
+
+    // if the remaining size is to small wrap
+    // anyway and use the next line
+    if (space < PROP_TEXT_MIN_CELLS)
+	space += wp->w_width;
+    for (n_used = 0; n_used < len; n_used += (*mb_ptr2len)(text + n_used))
+    {
+	int clen = ptr2cells(text + n_used);
+
+	if (strsize + clen > space)
+	    break;
+	strsize += clen;
+    }
+    *n_used_ptr = n_used;
+    return strsize;
+}
+#endif
+
 /*
  * Return the screen size of the character indicated by "cts".
  * "cts->cts_cur_text_width" is set to the extra size for a text property that
@@ -1047,6 +1094,7 @@ win_lbr_chartabsize(
     int		tab_corr = (*s == TAB);
     int		n;
     char_u	*sbr;
+    int		no_sbr = FALSE;
 #endif
 
 #if defined(FEAT_PROP_POPUP)
@@ -1080,35 +1128,56 @@ win_lbr_chartabsize(
     size = win_chartabsize(wp, s, vcol);
 
 # ifdef FEAT_PROP_POPUP
-    if (cts->cts_has_prop_with_text)
+    if (cts->cts_has_prop_with_text && *line != NUL)
     {
-	int i;
-	int col = (int)(s - line);
+	int	    i;
+	int	    col = (int)(s - line);
+	garray_T    *gap = &wp->w_buffer->b_textprop_text;
 
 	for (i = 0; i < cts->cts_text_prop_count; ++i)
 	{
 	    textprop_T *tp = cts->cts_text_props + i;
 
+	    // Watch out for the text being deleted.  "cts_text_props" is a
+	    // copy, the text prop may actually have been removed from the line.
 	    if (tp->tp_id < 0
-		    && ((tp->tp_col - 1 >= col && tp->tp_col - 1 < col + size
-			&& -tp->tp_id <= wp->w_buffer->b_textprop_text.ga_len)
-		    || (tp->tp_col == MAXCOL && (s[0] == NUL || s[1] == NUL)
-						   && cts->cts_with_trailing)))
+		    && ((tp->tp_col - 1 >= col && tp->tp_col - 1 < col + size)
+		       || (tp->tp_col == MAXCOL && (s[0] == NUL || s[1] == NUL)
+						   && cts->cts_with_trailing))
+		    && -tp->tp_id - 1 < gap->ga_len)
 	    {
-		char_u *p = ((char_u **)wp->w_buffer->b_textprop_text.ga_data)[
-							       -tp->tp_id - 1];
-		int len = vim_strsize(p);
+		char_u *p = ((char_u **)gap->ga_data)[-tp->tp_id - 1];
 
-		if (tp->tp_col == MAXCOL)
+		if (p != NULL)
 		{
-		    // TODO: truncating
-		    if (tp->tp_flags & TP_FLAG_ALIGN_BELOW)
-			len += wp->w_width - (vcol + size) % wp->w_width;
+		    int	cells = vim_strsize(p);
+
+		    added = wp->w_width - (vcol + size) % wp->w_width;
+		    if (tp->tp_col == MAXCOL)
+		    {
+			int below = (tp->tp_flags & TP_FLAG_ALIGN_BELOW);
+			int wrap = (tp->tp_flags & TP_FLAG_WRAP);
+			int len = (int)STRLEN(p);
+			int n_used = len;
+
+			// Keep in sync with where textprop_size_after_trunc()
+			// is called in win_line().
+			if (!wrap)
+			    cells = textprop_size_after_trunc(wp,
+						     below, added, p, &n_used);
+			// right-aligned does not really matter here, same as
+			// "after"
+			if (below)
+			    cells += wp->w_width - (vcol + size) % wp->w_width;
+#ifdef FEAT_LINEBREAK
+			no_sbr = TRUE;  // don't use 'showbreak' now
+#endif
+		    }
+		    cts->cts_cur_text_width += cells;
+		    size += cells;
 		}
-		cts->cts_cur_text_width += len;
-		size += len;
 	    }
-	    if (tp->tp_col - 1 > col)
+	    if (tp->tp_col != MAXCOL && tp->tp_col - 1 > col)
 		break;
 	}
     }
@@ -1177,7 +1246,7 @@ win_lbr_chartabsize(
      * Do not use 'showbreak' at the NUL after the text.
      */
     added = 0;
-    sbr = c == NUL ? empty_option : get_showbreak_value(wp);
+    sbr = (c == NUL || no_sbr) ? empty_option : get_showbreak_value(wp);
     if ((*sbr != NUL || wp->w_p_bri) && wp->w_p_wrap && vcol != 0)
     {
 	colnr_T sbrlen = 0;

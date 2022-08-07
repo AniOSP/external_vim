@@ -815,6 +815,8 @@ typedef struct textprop_S
 
 #define TP_FLAG_WRAP		0x40	// virtual text wraps - when missing
 					// text is truncated
+#define PROP_TEXT_MIN_CELLS	4	// minimun number of cells to use for
+					// the text, even when truncating
 
 /*
  * Structure defining a property type.
@@ -832,6 +834,7 @@ typedef struct proptype_S
 #define PT_FLAG_INS_START_INCL	1	// insert at start included in property
 #define PT_FLAG_INS_END_INCL	2	// insert at end included in property
 #define PT_FLAG_COMBINE		4	// combine with syntax highlight
+#define PT_FLAG_OVERRIDE	8	// override any highlight
 
 // Sign group
 typedef struct signgroup_S
