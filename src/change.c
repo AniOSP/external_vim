@@ -801,6 +801,7 @@ deleted_lines_mark(linenr_T lnum, long count)
 
 /*
  * Marks the area to be redrawn after a change.
+ * Consider also calling changed_line_display_buf().
  */
     void
 changed_lines_buf(
@@ -1298,7 +1299,7 @@ del_bytes(
 	// fixpos is TRUE, we don't want to end up positioned at the NUL,
 	// unless "restart_edit" is set or 'virtualedit' contains "onemore".
 	if (col > 0 && fixpos && restart_edit == 0
-					      && (get_ve_flags() & VE_ONEMORE) == 0)
+					 && (get_ve_flags() & VE_ONEMORE) == 0)
 	{
 	    --curwin->w_cursor.col;
 	    curwin->w_cursor.coladd = 0;

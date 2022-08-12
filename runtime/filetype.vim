@@ -1160,6 +1160,7 @@ au BufNewFile,BufRead *.mf			setf mf
 
 " MetaPost
 au BufNewFile,BufRead *.mp			setf mp
+au BufNewFile,BufRead *.mpxl,*.mpiv,*.mpvi	let b:mp_metafun = 1 | setf mp
 
 " MGL
 au BufNewFile,BufRead *.mgl			setf mgl
@@ -1530,6 +1531,9 @@ au BufNewFile,BufRead *.ptl,*.pyi,SConstruct		   setf python
 
 " QL
 au BufRead,BufNewFile *.ql,*.qll		setf ql
+
+" Quarto
+au BufRead,BufNewFile *.qmd     setf quarto
 
 " Radiance
 au BufNewFile,BufRead *.rad,*.mat		setf radiance
