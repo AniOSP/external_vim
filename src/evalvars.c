@@ -2953,6 +2953,7 @@ eval_variable(
 	    {
 		if (rettv != NULL)
 		{
+		    // special value that is used in handle_subscript()
 		    rettv->v_type = VAR_ANY;
 		    rettv->vval.v_number = sid != 0 ? sid : import->imp_sid;
 		}
@@ -3827,7 +3828,7 @@ set_var_const(
 		else if (STRCMP(varname, "hlsearch") == 0)
 		{
 		    no_hlsearch = !di->di_tv.vval.v_number;
-		    redraw_all_later(SOME_VALID);
+		    redraw_all_later(UPD_SOME_VALID);
 		}
 #endif
 		goto failed;

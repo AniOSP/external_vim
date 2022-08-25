@@ -9,7 +9,7 @@
 
 /*
  * drawline.c: Functions for drawing window lines on the screen.
- * This is the middle level, drawscreen. is the higher level and screen.c the
+ * This is the middle level, drawscreen.c is the higher level and screen.c the
  * lower level.
  */
 
@@ -277,69 +277,123 @@ get_sign_display_info(
 }
 #endif
 
-#ifdef FEAT_PROP_POPUP
-static textprop_T	*current_text_props = NULL;
-static buf_T		*current_buf = NULL;
-
+#if defined(FEAT_PROP_POPUP) || defined(PROTO)
 /*
- * Function passed to qsort() to sort text properties.
- * Return 1 if "s1" has priority over "s2", -1 if the other way around, zero if
- * both have the same priority.
+ * Take care of padding, right-align and truncation of virtual text after a
+ * line.
+ * if "n_attr" is not NULL then "n_extra" and "p_extra" are adjusted for any
+ * padding, right-align and truncation.  Otherwise only the size is computed.
+ * When "n_attr" is NULL returns the number of screen cells used.
+ * Otherwise returns TRUE when drawing continues on the next line.
  */
-    static int
-text_prop_compare(const void *s1, const void *s2)
+    int
+text_prop_position(
+	win_T	    *wp,
+	textprop_T  *tp,
+	int	    vcol,	    // current screen column
+	int	    *n_extra,	    // nr of bytes for virtual text
+	char_u	    **p_extra,	    // virtual text
+	int	    *n_attr,	    // attribute cells, NULL if not used
+	int	    *n_attr_skip)   // cells to skip attr, NULL if not used
 {
-    int  idx1, idx2;
-    textprop_T	*tp1, *tp2;
-    proptype_T  *pt1, *pt2;
-    colnr_T col1, col2;
+    int	    right = (tp->tp_flags & TP_FLAG_ALIGN_RIGHT);
+    int	    below = (tp->tp_flags & TP_FLAG_ALIGN_BELOW);
+    int	    wrap = (tp->tp_flags & TP_FLAG_WRAP);
+    int	    padding = tp->tp_col == MAXCOL && tp->tp_len > 1
+				  ? tp->tp_len - 1 : 0;
+    int	    col_with_padding = vcol + (below ? 0 : padding);
+    int	    room = wp->w_width - col_with_padding;
+    int	    added = room;
+    int	    n_used = *n_extra;
+    char_u  *l = NULL;
+    int	    strsize = vim_strsize(*p_extra);
+    int	    cells = wrap ? strsize
+	      : textprop_size_after_trunc(wp, below, added, *p_extra, &n_used);
 
-    idx1 = *(int *)s1;
-    idx2 = *(int *)s2;
-    tp1 = &current_text_props[idx1];
-    tp2 = &current_text_props[idx2];
-    col1 = tp1->tp_col;
-    col2 = tp2->tp_col;
-    if (col1 == MAXCOL && col2 == MAXCOL)
+    if (wrap || right || below || padding > 0 || n_used < *n_extra)
     {
-	int flags1 = 0;
-	int flags2 = 0;
+	// Right-align: fill with spaces
+	if (right)
+	    added -= cells;
+	if (added < 0
+		|| !(right || below)
+		|| (below
+		    ? (col_with_padding == 0 || !wp->w_p_wrap)
+		    : (n_used < *n_extra)))
+	{
+	    if (right && (wrap || room < PROP_TEXT_MIN_CELLS))
+	    {
+		// right-align on next line instead of wrapping if possible
+		added = wp->w_width - strsize + room;
+		if (added < 0)
+		    added = 0;
+		else
+		    n_used = *n_extra;
+	    }
+	    else
+		added = 0;
+	}
 
-	// both props add text are after the line, order on 0: after (default),
-	// 1: right, 2: below (comes last)
-	if (tp1->tp_flags & TP_FLAG_ALIGN_RIGHT)
-	    flags1 = 1;
-	if (tp1->tp_flags & TP_FLAG_ALIGN_BELOW)
-	    flags1 = 2;
-	if (tp2->tp_flags & TP_FLAG_ALIGN_RIGHT)
-	    flags2 = 1;
-	if (tp2->tp_flags & TP_FLAG_ALIGN_BELOW)
-	    flags2 = 2;
-	if (flags1 != flags2)
-	    return flags1 < flags2 ? 1 : -1;
+	// With 'nowrap' add one to show the "extends" character if needed (it
+	// doesn't show if the text just fits).
+	if (!wp->w_p_wrap
+		&& n_used < *n_extra
+		&& wp->w_lcs_chars.ext != NUL
+		&& wp->w_p_list)
+	    ++n_used;
+
+	// add 1 for NUL, 2 for when '…' is used
+	if (n_attr != NULL)
+	    l = alloc(n_used + added + padding + 3);
+	if (n_attr == NULL || l != NULL)
+	{
+	    int off = 0;
+
+	    if (n_attr != NULL)
+	    {
+		vim_memset(l, ' ', added);
+		off += added;
+		if (padding > 0)
+		{
+		    vim_memset(l + off, ' ', padding);
+		    off += padding;
+		}
+		vim_strncpy(l + off, *p_extra, n_used);
+		off += n_used;
+	    }
+	    else
+	    {
+		off = added + padding + n_used;
+		cells += added + padding;
+	    }
+	    if (n_attr != NULL)
+	    {
+		if (n_used < *n_extra && wp->w_p_wrap)
+		{
+		    char_u *lp = l + off - 1;
+
+		    if (has_mbyte)
+		    {
+			// change last character to '…'
+			lp -= (*mb_head_off)(l, lp);
+			STRCPY(lp, "…");
+			n_used = lp - l + 3 - padding;
+		    }
+		    else
+			// change last character to '>'
+			*lp = '>';
+		}
+		*p_extra = l;
+		*n_extra = n_used + added + padding;
+		*n_attr = mb_charlen(*p_extra);
+		*n_attr_skip = added + padding;
+	    }
+	}
     }
 
-    // property that inserts text has priority over one that doesn't
-    if ((tp1->tp_id < 0) != (tp2->tp_id < 0))
-	return tp1->tp_id < 0 ? 1 : -1;
-
-    // check highest priority, defined by the type
-    pt1 = text_prop_type_by_id(current_buf, tp1->tp_type);
-    pt2 = text_prop_type_by_id(current_buf, tp2->tp_type);
-    if (pt1 != pt2)
-    {
-	if (pt1 == NULL)
-	    return -1;
-	if (pt2 == NULL)
-	    return 1;
-	if (pt1->pt_priority != pt2->pt_priority)
-	    return pt1->pt_priority > pt2->pt_priority ? 1 : -1;
-    }
-
-    // same priority, one that starts first wins
-    if (col1 != col2)
-	return col1 < col2 ? 1 : -1;
-    return 0;
+    if (n_attr == NULL)
+	return cells;
+    return (below && col_with_padding > win_col_off(wp) && !wp->w_p_wrap);
 }
 #endif
 
@@ -554,6 +608,7 @@ win_line(
     int		*text_prop_idxs = NULL;
     int		text_props_active = 0;
     proptype_T  *text_prop_type = NULL;
+    int		extra_for_textprop = FALSE; // wlv.n_extra set for textprop
     int		text_prop_attr = 0;
     int		text_prop_id = 0;	// active property ID
     int		text_prop_flags = 0;
@@ -1213,6 +1268,9 @@ win_line(
 
 	    // Allocate an array for the indexes.
 	    text_prop_idxs = ALLOC_MULT(int, text_prop_count);
+	    if (text_prop_idxs == NULL)
+		VIM_CLEAR(text_props);
+
 	    area_highlighting = TRUE;
 	    extra_check = TRUE;
 	}
@@ -1603,8 +1661,9 @@ win_line(
 		{
 		    int tpi = text_prop_idxs[pi];
 
-		    if (bcol >= text_props[tpi].tp_col - 1
-						  + text_props[tpi].tp_len)
+		    if (text_props[tpi].tp_col != MAXCOL
+			    && bcol >= text_props[tpi].tp_col - 1
+						      + text_props[tpi].tp_len)
 		    {
 			if (pi + 1 < text_props_active)
 			    mch_memmove(text_prop_idxs + pi,
@@ -1638,16 +1697,27 @@ win_line(
 						       & TP_FLAG_ALIGN_BELOW)))
 			      : bcol >= text_props[text_prop_next].tp_col - 1))
 		{
-		    if (bcol <= text_props[text_prop_next].tp_col - 1
+		    if (text_props[text_prop_next].tp_col == MAXCOL
+			     && *ptr == NUL && wp->w_p_list && lcs_eol_one > 0)
+		    {
+			// first display the '$' after the line
+			text_prop_follows = TRUE;
+			break;
+		    }
+		    if (text_props[text_prop_next].tp_col == MAXCOL
+			    || bcol <= text_props[text_prop_next].tp_col - 1
 					   + text_props[text_prop_next].tp_len)
 			text_prop_idxs[text_props_active++] = text_prop_next;
 		    ++text_prop_next;
 		}
 
-		text_prop_attr = 0;
-		text_prop_flags = 0;
-		text_prop_type = NULL;
-		text_prop_id = 0;
+		if (wlv.n_extra == 0 || !extra_for_textprop)
+		{
+		    text_prop_attr = 0;
+		    text_prop_flags = 0;
+		    text_prop_type = NULL;
+		    text_prop_id = 0;
+		}
 		if (text_props_active > 0 && wlv.n_extra == 0)
 		{
 		    int used_tpi = -1;
@@ -1657,10 +1727,8 @@ win_line(
 		    // Sort the properties on priority and/or starting last.
 		    // Then combine the attributes, highest priority last.
 		    text_prop_follows = FALSE;
-		    current_text_props = text_props;
-		    current_buf = wp->w_buffer;
-		    qsort((void *)text_prop_idxs, (size_t)text_props_active,
-					       sizeof(int), text_prop_compare);
+		    sort_text_props(wp->w_buffer, text_props,
+					    text_prop_idxs, text_props_active);
 
 		    for (pi = 0; pi < text_props_active; ++pi)
 		    {
@@ -1687,27 +1755,33 @@ win_line(
 			    && -text_prop_id
 				      <= wp->w_buffer->b_textprop_text.ga_len)
 		    {
-			char_u *p = ((char_u **)wp->w_buffer
+			textprop_T  *tp = &text_props[used_tpi];
+			char_u	    *p = ((char_u **)wp->w_buffer
 						   ->b_textprop_text.ga_data)[
 							   -text_prop_id - 1];
 
 			// reset the ID in the copy to avoid it being used
 			// again
-			text_props[used_tpi].tp_id = -MAXCOL;
+			tp->tp_id = -MAXCOL;
 
 			if (p != NULL)
 			{
-			    int	    right = (text_props[used_tpi].tp_flags
+			    int	    right = (tp->tp_flags
 							& TP_FLAG_ALIGN_RIGHT);
-			    int	    below = (text_props[used_tpi].tp_flags
+			    int	    below = (tp->tp_flags
 							& TP_FLAG_ALIGN_BELOW);
-			    int	    wrap = (text_props[used_tpi].tp_flags
-							& TP_FLAG_WRAP);
+			    int	    wrap = (tp->tp_flags & TP_FLAG_WRAP);
+			    int	    padding = tp->tp_col == MAXCOL
+						 && tp->tp_len > 1
+							  ? tp->tp_len - 1 : 0;
 
+			    // Insert virtual text before the current
+			    // character, or add after the end of the line.
 			    wlv.p_extra = p;
 			    wlv.c_extra = NUL;
 			    wlv.c_final = NUL;
 			    wlv.n_extra = (int)STRLEN(p);
+			    extra_for_textprop = TRUE;
 			    extra_attr = used_attr;
 			    n_attr = mb_charlen(p);
 			    saved_search_attr = search_attr;
@@ -1728,62 +1802,30 @@ win_line(
 			    // Keep in sync with where
 			    // textprop_size_after_trunc() is called in
 			    // win_lbr_chartabsize().
-			    if ((right || below || !wrap) && wp->w_width > 2)
+			    if ((right || below || !wrap || padding > 0)
+							    && wp->w_width > 2)
 			    {
-				int	added = wp->w_width - wlv.col;
-				int	n_used = wlv.n_extra;
-				char_u	*l;
-				int	strsize = wrap
-					  ? vim_strsize(wlv.p_extra)
-					  : textprop_size_after_trunc(wp,
-					   below, added, wlv.p_extra, &n_used);
+				char_u	*prev_p_extra = wlv.p_extra;
+				int	start_line;
 
-				if (wrap || right || below
-						       || n_used < wlv.n_extra)
+				// Take care of padding, right-align and
+				// truncation.
+				// Shared with win_lbr_chartabsize(), must do
+				// exactly the same.
+				start_line = text_prop_position(wp, tp,
+						    wlv.col,
+						    &wlv.n_extra, &wlv.p_extra,
+						    &n_attr, &n_attr_skip);
+				if (wlv.p_extra != prev_p_extra)
 				{
-				    // Right-align: fill with spaces
-				    if (right)
-					added -= strsize;
-				    if (added < 0
-					    || (below
-						? wlv.col == 0 || !wp->w_p_wrap
-						: n_used < wlv.n_extra))
-					added = 0;
-				    // add 1 for NUL, 2 for when '…' is used
-				    l = alloc(n_used + added + 3);
-				    if (l != NULL)
-				    {
-					vim_memset(l, ' ', added);
-					vim_strncpy(l + added, wlv.p_extra,
-								       n_used);
-					if (n_used < wlv.n_extra
-							       && wp->w_p_wrap)
-					{
-					    char_u *lp = l + added + n_used - 1;
-
-					    if (has_mbyte)
-					    {
-						// change last character to '…'
-						lp -= (*mb_head_off)(l, lp);
-						STRCPY(lp, "…");
-						n_used = lp - l + 3;
-					    }
-					    else
-						// change last character to '>'
-						*lp = '>';
-					}
-					vim_free(p_extra_free2);
-					wlv.p_extra = p_extra_free2 = l;
-					wlv.n_extra = n_used + added;
-					n_attr_skip = added;
-					n_attr = mb_charlen(wlv.p_extra);
-				    }
+				    // wlv.p_extra was allocated
+				    vim_free(p_extra_free2);
+				    p_extra_free2 = wlv.p_extra;
 				}
 
 				// When 'wrap' is off then for "below" we need
 				// to start a new line explictly.
-				if (below && wlv.col > win_col_off(wp)
-							      && !wp->w_p_wrap)
+				if (start_line)
 				{
 				    draw_screen_line(wp, &wlv);
 
@@ -2093,6 +2135,7 @@ win_line(
 #if defined(FEAT_PROP_POPUP)
 	    if (wlv.n_extra <= 0)
 	    {
+		extra_for_textprop = FALSE;
 		in_linebreak = FALSE;
 		if (search_attr == 0)
 		    search_attr = saved_search_attr;
@@ -2721,16 +2764,10 @@ win_line(
 		    {
 			// In virtualedit, visual selections may extend
 			// beyond end of line.
-			if (area_highlighting && virtual_active()
-				&& tocol != MAXCOL && wlv.vcol < tocol)
-			    wlv.n_extra = 0;
-			else
-			{
+			if (!(area_highlighting && virtual_active()
+				       && tocol != MAXCOL && wlv.vcol < tocol))
 			    wlv.p_extra = at_end_str;
-			    wlv.n_extra = 1;
-			    wlv.c_extra = NUL;
-			    wlv.c_final = NUL;
-			}
+			wlv.n_extra = 0;
 		    }
 		    if (wp->w_p_list && wp->w_lcs_chars.eol > 0)
 			c = wp->w_lcs_chars.eol;
@@ -2981,15 +3018,20 @@ win_line(
 	}
 #endif
 
-	// Use "extra_attr", but don't override visual selection highlighting.
+	// Use "extra_attr", but don't override visual selection highlighting,
+	// unless text property overrides.
 	// Don't use "extra_attr" until n_attr_skip is zero.
 	if (n_attr_skip == 0 && n_attr > 0
 		&& wlv.draw_state == WL_LINE
-		&& !attr_pri)
+		&& (!attr_pri
+#ifdef FEAT_PROP_POPUP
+		    || (text_prop_flags & PT_FLAG_OVERRIDE)
+#endif
+		   ))
 	{
 #ifdef LINE_ATTR
 	    if (line_attr)
-		wlv.char_attr = hl_combine_attr(extra_attr, line_attr);
+		wlv.char_attr = hl_combine_attr(line_attr, extra_attr);
 	    else
 #endif
 		wlv.char_attr = extra_attr;
@@ -3206,8 +3248,8 @@ win_line(
 #endif
 		    wlv.col == wp->w_width - 1)
 		&& (*ptr != NUL
-		    || (wp->w_p_list && lcs_eol_one > 0)
-		    || (wlv.n_extra && (wlv.c_extra != NUL
+		    || lcs_eol_one > 0
+		    || (wlv.n_extra > 0 && (wlv.c_extra != NUL
 						     || *wlv.p_extra != NUL))))
 	{
 	    c = wp->w_lcs_chars.ext;

@@ -2098,7 +2098,7 @@ getchar_common(typval_T *argvars, typval_T *rettv)
 
     // redraw the screen after getchar()
     if (p_ch == 0)
-	update_screen(CLEAR);
+	update_screen(UPD_CLEAR);
 
     set_vim_var_nr(VV_MOUSE_WIN, 0);
     set_vim_var_nr(VV_MOUSE_WINID, 0);
@@ -3056,7 +3056,10 @@ vgetorpeek(int advance)
     ++vgetc_busy;
 
     if (advance)
+    {
 	KeyStuffed = FALSE;
+	typebuf_was_empty = FALSE;
+    }
 
     init_typebuf();
     start_stuff();
@@ -3361,6 +3364,10 @@ vgetorpeek(int advance)
 #ifdef FEAT_CMDWIN
 		    tc = c;
 #endif
+		    // set a flag to indicate this wasn't a normal char
+		    if (advance)
+			typebuf_was_empty = TRUE;
+
 		    // return from main_loop()
 		    if (pending_exmode_active)
 			exmode_active = EXMODE_NORMAL;

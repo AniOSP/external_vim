@@ -800,7 +800,8 @@ typedef struct memline
 typedef struct textprop_S
 {
     colnr_T	tp_col;		// start column (one based, in bytes)
-    colnr_T	tp_len;		// length in bytes
+    colnr_T	tp_len;		// length in bytes, when tp_id is negative used
+				// for left padding plus one
     int		tp_id;		// identifier
     int		tp_type;	// property type
     int		tp_flags;	// TP_FLAG_ values
@@ -815,6 +816,8 @@ typedef struct textprop_S
 
 #define TP_FLAG_WRAP		0x40	// virtual text wraps - when missing
 					// text is truncated
+#define TP_FLAG_START_INCL	0x80	// "start_incl" copied from proptype
+
 #define PROP_TEXT_MIN_CELLS	4	// minimun number of cells to use for
 					// the text, even when truncating
 
@@ -1847,12 +1850,18 @@ typedef struct {
 #define IMP_FLAGS_AUTOLOAD	4   // script still needs to be loaded
 
 /*
- * Info about an already sourced scripts.
+ * Info about an encoutered script.
+ * When sn_state has the SN_STATE_NOT_LOADED is has not been sourced yet.
  */
 typedef struct
 {
     char_u	*sn_name;	    // full path of script file
     int		sn_script_seq;	    // latest sctx_T sc_seq value
+
+    // When non-zero the script ID of the actually sourced script.  Used if a
+    // script is used by a name which has a symlink, we list both names, but
+    // only the linked-to script is actually sourced.
+    int		sn_sourced_sid;
 
     // "sn_vars" stores the s: variables currently valid.  When leaving a block
     // variables local to that block are removed.
@@ -2957,9 +2966,7 @@ struct file_buffer
     int		b_p_ma;		// 'modifiable'
     char_u	*b_p_nf;	// 'nrformats'
     int		b_p_pi;		// 'preserveindent'
-#ifdef FEAT_TEXTOBJ
     char_u	*b_p_qe;	// 'quoteescape'
-#endif
     int		b_p_ro;		// 'readonly'
     long	b_p_sw;		// 'shiftwidth'
     int		b_p_sn;		// 'shortname'
@@ -3696,7 +3703,7 @@ struct window_S
 
     int		w_redr_type;	    // type of redraw to be performed on win
     int		w_upd_rows;	    // number of window lines to update when
-				    // w_redr_type is REDRAW_TOP
+				    // w_redr_type is UPD_REDRAW_TOP
     linenr_T	w_redraw_top;	    // when != 0: first line needing redraw
     linenr_T	w_redraw_bot;	    // when != 0: last line needing redraw
     int		w_redr_status;	    // if TRUE status line must be redrawn
@@ -4587,6 +4594,7 @@ typedef struct {
     int         cts_cur_text_width;     // width of current inserted text
     int		cts_with_trailing;	// include size of trailing props with
 					// last character
+    int		cts_start_incl;		// prop has true "start_incl" arg
 #endif
     int		cts_vcol;	    // virtual column at current position
 } chartabsize_T;

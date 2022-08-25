@@ -4352,7 +4352,7 @@ qf_win_goto(win_T *win, linenr_T lnum)
     curwin->w_cursor.coladd = 0;
     curwin->w_curswant = 0;
     update_topline();		// scroll to show the line
-    redraw_later(VALID);
+    redraw_later(UPD_VALID);
     curwin->w_redr_status = TRUE;	// update ruler
     curwin = old_curwin;
     curbuf = curwin->w_buffer;
@@ -4573,7 +4573,7 @@ qf_update_buffer(qf_info_T *qi, qfline_T *old_last)
 	// Only redraw when added lines are visible.  This avoids flickering
 	// when the added lines are not visible.
 	if ((win = qf_find_win(qi)) != NULL && old_line_count < win->w_botline)
-	    redraw_buf_later(buf, NOT_VALID);
+	    redraw_buf_later(buf, UPD_NOT_VALID);
     }
 }
 
@@ -4674,6 +4674,11 @@ call_qftf_func(qf_list_T *qfl, int qf_winid, long start_idx, long end_idx)
 {
     callback_T	*cb = &qftf_cb;
     list_T	*qftf_list = NULL;
+    static int	recursive = FALSE;
+
+    if (recursive)
+	return NULL;  // this doesn't work properly recursively
+    recursive = TRUE;
 
     // If 'quickfixtextfunc' is set, then use the user-supplied function to get
     // the text to display. Use the local value of 'quickfixtextfunc' if it is
@@ -4688,7 +4693,10 @@ call_qftf_func(qf_list_T *qfl, int qf_winid, long start_idx, long end_idx)
 
 	// create the dict argument
 	if ((d = dict_alloc_lock(VAR_FIXED)) == NULL)
+	{
+	    recursive = FALSE;
 	    return NULL;
+	}
 	dict_add_number(d, "quickfix", (long)IS_QF_LIST(qfl));
 	dict_add_number(d, "winid", (long)qf_winid);
 	dict_add_number(d, "id", (long)qfl->qf_id);
@@ -4711,6 +4719,7 @@ call_qftf_func(qf_list_T *qfl, int qf_winid, long start_idx, long end_idx)
 	dict_unref(d);
     }
 
+    recursive = FALSE;
     return qftf_list;
 }
 
@@ -4827,7 +4836,7 @@ qf_fill_buffer(qf_list_T *qfl, buf_T *buf, qfline_T *old_last, int qf_winid)
 	--curbuf_lock;
 
 	// make sure it will be redrawn
-	redraw_curbuf_later(NOT_VALID);
+	redraw_curbuf_later(UPD_NOT_VALID);
     }
 
     // Restore KeyTyped, setting 'filetype' may reset it.
@@ -6468,7 +6477,7 @@ ex_vimgrep(exarg_T *eap)
 #ifdef FEAT_FOLDING
 	foldUpdateAll(curwin);
 #else
-	redraw_later(NOT_VALID);
+	redraw_later(UPD_NOT_VALID);
 #endif
     }
 
