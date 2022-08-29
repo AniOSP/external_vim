@@ -1400,39 +1400,42 @@ func Test_gui_drop_files()
   %argdelete
   " pressing shift when dropping files should change directory
   let save_cwd = getcwd()
-  call mkdir('Xdir1')
-  call writefile([], 'Xdir1/Xfile1')
-  call writefile([], 'Xdir1/Xfile2')
-  let d = #{files: ['Xdir1/Xfile1', 'Xdir1/Xfile2'], row: 1, col: 1,
+  call mkdir('Xdropdir1')
+  call writefile([], 'Xdropdir1/Xfile1')
+  call writefile([], 'Xdropdir1/Xfile2')
+  let d = #{files: ['Xdropdir1/Xfile1', 'Xdropdir1/Xfile2'], row: 1, col: 1,
         \ modifiers: 0x4}
   call test_gui_event('dropfiles', d)
-  call assert_equal('Xdir1', fnamemodify(getcwd(), ':t'))
+  call assert_equal('Xdropdir1', fnamemodify(getcwd(), ':t'))
   call assert_equal('Xfile1', @%)
   call chdir(save_cwd)
   " pressing shift when dropping directory and files should change directory
-  let d = #{files: ['Xdir1', 'Xdir1/Xfile2'], row: 1, col: 1, modifiers: 0x4}
+  let d = #{files: ['Xdropdir1', 'Xdropdir1/Xfile2'], row: 1, col: 1, modifiers: 0x4}
   call test_gui_event('dropfiles', d)
-  call assert_equal('Xdir1', fnamemodify(getcwd(), ':t'))
-  call assert_equal('Xdir1', fnamemodify(@%, ':t'))
+  call assert_equal('Xdropdir1', fnamemodify(getcwd(), ':t'))
+  call assert_equal('Xdropdir1', fnamemodify(@%, ':t'))
   call chdir(save_cwd)
   %bw!
   %argdelete
   " dropping a directory should edit it
-  let d = #{files: ['Xdir1'], row: 1, col: 1, modifiers: 0}
+  let d = #{files: ['Xdropdir1'], row: 1, col: 1, modifiers: 0}
   call test_gui_event('dropfiles', d)
-  call assert_equal('Xdir1', @%)
+  call assert_equal('Xdropdir1', @%)
   %bw!
   %argdelete
   " dropping only a directory name with Shift should ignore it
-  let d = #{files: ['Xdir1'], row: 1, col: 1, modifiers: 0x4}
+  let d = #{files: ['Xdropdir1'], row: 1, col: 1, modifiers: 0x4}
   call test_gui_event('dropfiles', d)
   call assert_equal('', @%)
   %bw!
   %argdelete
-  call delete('Xdir1', 'rf')
+  call delete('Xdropdir1', 'rf')
+
   " drop files in the command line. The GUI drop files adds the file names to
   " the low level input buffer. So need to use a cmdline map and feedkeys()
   " with 'Lx!' to process it in this function itself.
+  " This sometimes fails, e.g. when using valgrind.
+  let g:test_is_flaky = 1
   cnoremap <expr> <buffer> <F4> DropFilesInCmdLine()
   call feedkeys(":\"\<F4>\<CR>", 'xt')
   call feedkeys('k', 'Lx!')
